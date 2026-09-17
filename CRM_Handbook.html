@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick CRM Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #f6f8f6;
+    --surface:     #ffffff;
+    --surface-alt: #eef2ef;
+    --ink:         #16211d;
+    --ink-soft:    #4d5c56;
+    --ink-faint:   #7d8b85;
+    --rule:        #dde4df;
+    --rule-strong: #c3cec8;
+    --accent:      #2f6f5e;
+    --accent-deep: #193f34;
+    --accent-wash: #e4efe9;
+    --warn:        #a6631f;
+    --warn-wash:   #f7ecdb;
+    --danger:      #a13f3f;
+    --danger-wash: #f6e5e3;
+    --shadow:      0 1px 2px rgba(22, 33, 29, .05), 0 8px 24px -16px rgba(22, 33, 29, .25);
+
+    --step: clamp(1rem, 0.95rem + 0.25vw, 1.0625rem);
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0f1614;
+      --surface:     #161f1c;
+      --surface-alt: #1d2724;
+      --ink:         #e3ebe7;
+      --ink-soft:    #a3b1ab;
+      --ink-faint:   #7e8c86;
+      --rule:        #27332e;
+      --rule-strong: #35443e;
+      --accent:      #6cbfa3;
+      --accent-deep: #a8dcc8;
+      --accent-wash: #172a24;
+      --warn:        #d9a05c;
+      --warn-wash:   #2b2318;
+      --danger:      #d98a86;
+      --danger-wash: #2b1c1b;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0f1614;
+    --surface:     #161f1c;
+    --surface-alt: #1d2724;
+    --ink:         #e3ebe7;
+    --ink-soft:    #a3b1ab;
+    --ink-faint:   #7e8c86;
+    --rule:        #27332e;
+    --rule-strong: #35443e;
+    --accent:      #6cbfa3;
+    --accent-deep: #a8dcc8;
+    --accent-wash: #172a24;
+    --warn:        #d9a05c;
+    --warn-wash:   #2b2318;
+    --danger:      #d98a86;
+    --danger-wash: #2b1c1b;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: var(--step);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0 56px;
+  }
+
+  @media (min-width: 1040px) {
+    .shell { grid-template-columns: 218px minmax(0, 1fr); }
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead {
+    grid-column: 1 / -1;
+    padding: 72px 0 40px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .74rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  .masthead h1 {
+    font-family: 'IBM Plex Serif', Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(2.1rem, 1.4rem + 2.6vw, 3.1rem);
+    line-height: 1.1;
+    letter-spacing: -.018em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 1.12rem;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 28px;
+  }
+  .meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .78rem;
+    color: var(--ink-faint);
+  }
+  .meta-strip span strong {
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+
+  /* ---------- Contents rail ---------- */
+  .toc { display: none; }
+  @media (min-width: 1040px) {
+    .toc {
+      display: block;
+      position: sticky;
+      top: 32px;
+      align-self: start;
+      max-height: calc(100vh - 64px);
+      overflow-y: auto;
+      padding-bottom: 32px;
+    }
+  }
+  .toc h2 {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    margin: 0 0 14px;
+  }
+  .toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .toc a {
+    display: block;
+    padding: 5px 12px;
+    border-left: 2px solid var(--rule);
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: .875rem;
+    line-height: 1.4;
+  }
+  .toc a:hover { color: var(--accent); border-left-color: var(--accent); background: var(--accent-wash); }
+  .toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- Article ---------- */
+  article { min-width: 0; }
+  section { margin-bottom: 72px; scroll-margin-top: 24px; }
+  section > :last-child { margin-bottom: 0; }
+
+  h2 {
+    font-family: 'IBM Plex Serif', Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(1.45rem, 1.2rem + 1vw, 1.85rem);
+    letter-spacing: -.012em;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    text-wrap: balance;
+  }
+  .section-note {
+    color: var(--ink-faint);
+    font-size: .95rem;
+    margin: 0 0 28px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    letter-spacing: -.005em;
+    margin: 36px 0 10px;
+  }
+  p { margin: 0 0 18px; max-width: 68ch; }
+  ul, ol { max-width: 68ch; padding-left: 22px; margin: 0 0 18px; }
+  li { margin-bottom: 8px; }
+  strong { font-weight: 600; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .875em;
+    background: var(--surface-alt);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .08em .34em;
+    white-space: nowrap;
+  }
+
+  /* ---------- Layer stack ---------- */
+  .layers { display: flex; flex-direction: column; gap: 10px; margin: 0 0 26px; }
+  .layer {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .layer-tag {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .08em;
+    color: var(--accent);
+    background: var(--accent-wash);
+    border-radius: 5px;
+    padding: 5px 0;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .layer h4 { margin: 0 0 4px; font-size: .98rem; font-weight: 600; }
+  .layer p { margin: 0; color: var(--ink-soft); font-size: .93rem; }
+
+  /* ---------- Flow ---------- */
+  .flow { margin: 0 0 26px; display: flex; flex-direction: column; gap: 0; }
+  .flow-step {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 18px;
+    position: relative;
+    padding-bottom: 22px;
+  }
+  .flow-step:last-child { padding-bottom: 0; }
+  .flow-step::before {
+    content: "";
+    position: absolute;
+    left: 16px;
+    top: 32px;
+    bottom: 0;
+    width: 1px;
+    background: var(--rule-strong);
+  }
+  .flow-step:last-child::before { display: none; }
+  .flow-num {
+    width: 33px; height: 33px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .82rem;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; z-index: 1;
+  }
+  .flow-body { padding-top: 4px; }
+  .flow-body h4 { margin: 0 0 3px; font-size: .96rem; font-weight: 600; }
+  .flow-body p { margin: 0; color: var(--ink-soft); font-size: .93rem; }
+  .flow-where {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .74rem;
+    color: var(--ink-faint);
+    display: block;
+    margin-top: 5px;
+  }
+
+  /* ---------- Tables ---------- */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--surface);
+    margin: 0 0 26px;
+    box-shadow: var(--shadow);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: .89rem; min-width: 520px; }
+  thead th {
+    text-align: left;
+    background: var(--surface-alt);
+    color: var(--ink-soft);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-weight: 500;
+    font-size: .72rem;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 11px 16px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody td { padding: 11px 16px; border-top: 1px solid var(--rule); vertical-align: top; }
+  tbody tr:first-child td { border-top: none; }
+  td code { white-space: normal; }
+  .col-file { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .82rem; white-space: nowrap; color: var(--accent-deep); }
+  :root[data-theme="dark"] .col-file { color: var(--accent-deep); }
+
+  /* ---------- Callouts ---------- */
+  .note {
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 0 0 26px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    max-width: 68ch;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note-label {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .note.warn { background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+  .note.warn .note-label { color: var(--warn); }
+  .note.danger { background: var(--danger-wash); border-color: color-mix(in srgb, var(--danger) 32%, transparent); }
+  .note.danger .note-label { color: var(--danger); }
+  .note.tip { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 32%, transparent); }
+  .note.tip .note-label { color: var(--accent); }
+
+  /* ---------- Gotcha cards ---------- */
+  .gotchas { display: flex; flex-direction: column; gap: 14px; margin: 0 0 26px; }
+  .gotcha {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--warn);
+    border-radius: 8px;
+    padding: 18px 22px;
+    box-shadow: var(--shadow);
+  }
+  .gotcha h4 { margin: 0 0 8px; font-size: 1rem; font-weight: 600; }
+  .gotcha p { margin: 0 0 10px; font-size: .93rem; color: var(--ink-soft); }
+  .gotcha p:last-child { margin-bottom: 0; }
+  .gotcha .verdict {
+    color: var(--ink);
+    border-top: 1px solid var(--rule);
+    padding-top: 10px;
+    margin-top: 12px;
+  }
+  .gotcha .verdict b { color: var(--accent); font-weight: 600; }
+
+  /* ---------- Steps ---------- */
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 26px; max-width: 68ch; }
+  ol.steps > li {
+    counter-increment: s;
+    position: relative;
+    padding: 0 0 16px 40px;
+    margin: 0;
+  }
+  ol.steps > li::before {
+    content: counter(s);
+    position: absolute;
+    left: 0; top: 1px;
+    width: 25px; height: 25px;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--surface);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: .76rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  :root[data-theme="dark"] ol.steps > li::before { color: #0f1614; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) ol.steps > li::before { color: #0f1614; }
+  }
+
+  footer {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--rule);
+    padding-top: 24px;
+    color: var(--ink-faint);
+    font-size: .86rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+  html { scroll-behavior: smooth; }
+</style>
+
+</head>
+<body>
+<div class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">System Documentation · Alpino Health Foods</p>
+    <h1>Quick CRM Handbook</h1>
+    <p class="lede">Everything about how your client and follow-up tracker actually works — the parts that talk to each other, the rules that will bite you, and what to do when something breaks.</p>
+    <div class="meta-strip">
+      <span><strong>Stack</strong> · Google Sheets + Apps Script</span>
+      <span><strong>Database</strong> · CRM DATA spreadsheet</span>
+      <span><strong>Users</strong> · Password login, role-based</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#overview">What it is</a></li>
+      <li><a href="#layers">The three layers</a></li>
+      <li><a href="#flow">How one action travels</a></li>
+      <li><a href="#database">The database</a></li>
+      <li><a href="#files">Every file explained</a></li>
+      <li><a href="#login">Login &amp; security</a></li>
+      <li><a href="#gotchas">Rules that will bite you</a></li>
+      <li><a href="#deploy">Publishing changes</a></li>
+      <li><a href="#tasks">Common tasks</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ol>
+  </nav>
+
+  <article>
+
+    <!-- ============ OVERVIEW ============ -->
+    <section id="overview">
+      <h2>What it is</h2>
+      <p class="section-note">The short version, before any of the machinery.</p>
+
+      <p>Quick CRM is a private web app for tracking clients and the calls you owe them. Your team opens one link, signs in with a name and password, and works with clean forms and tables. Behind that link, every record lives as a row in a single Google Sheet that only you can open.</p>
+
+      <p>That split is the whole design. Your team never touches the spreadsheet — they can't even open it. They only ever see the web app, which acts as a controlled window onto the data. You keep full spreadsheet access for yourself, which means you can always fix, export, or bulk-edit data directly when you need to.</p>
+
+      <p>It does three jobs: <strong>keep a client list</strong> with contact details, status, priority, and order value; <strong>schedule follow-ups</strong> against those clients and mark them done; and <strong>show a dashboard</strong> that counts what's active, what's due today, and what's overdue.</p>
+    </section>
+
+    <!-- ============ LAYERS ============ -->
+    <section id="layers">
+      <h2>The three layers</h2>
+      <p class="section-note">Three separate pieces, each with one job. Most confusion comes from mixing them up.</p>
+
+      <div class="layers">
+        <div class="layer">
+          <span class="layer-tag">Data</span>
+          <div>
+            <h4>The Google Sheet — your database</h4>
+            <p>The "CRM DATA" spreadsheet, with four tabs. Every client, follow-up, and user is a row here. Nothing else stores data — no hidden database anywhere.</p>
+          </div>
+        </div>
+        <div class="layer">
+          <span class="layer-tag">Server</span>
+          <div>
+            <h4>Apps Script — the rules and the gatekeeper</h4>
+            <p>The <code>.gs</code> files. They run on Google's servers, not in anyone's browser. They check who's asking, validate what they typed, read and write sheet rows, and generate IDs. This is the only layer allowed to touch the spreadsheet.</p>
+          </div>
+        </div>
+        <div class="layer">
+          <span class="layer-tag">Screen</span>
+          <div>
+            <h4>The web page — what people see</h4>
+            <p>The <code>.html</code> files. Sidebar, tables, forms, buttons, toast messages. It holds no data of its own — it asks the server for everything and draws whatever comes back.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="note tip">
+        <span class="note-label">Why it's built this way</span>
+        <p>The web app is deployed with <strong>Execute as: Me</strong>. That means when a teammate uses it, the sheet operations run under <em>your</em> Google permissions, not theirs. This is what lets you share the app without ever sharing the spreadsheet — and it's why the app needs its own name-and-password login instead of relying on Google sign-in.</p>
+      </div>
+    </section>
+
+    <!-- ============ FLOW ============ -->
+    <section id="flow">
+      <h2>How one action travels</h2>
+      <p class="section-note">Following a single "Save Client" click from the button to the spreadsheet and back. Every other action follows this same path.</p>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-num">1</div>
+          <div class="flow-body">
+            <h4>The form is read</h4>
+            <p>The browser collects every field into one bundle, then locks the Save button so a double-click can't create the record twice.</p>
+            <span class="flow-where">JavaScript.html → wireClientModal()</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">2</div>
+          <div class="flow-body">
+            <h4>The request is sent with your session token</h4>
+            <p>The <code>run()</code> helper automatically attaches your login token as the first argument, so the server always knows who is asking without the browser resending a password.</p>
+            <span class="flow-where">JavaScript.html → run() and callServer()</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">3</div>
+          <div class="flow-body">
+            <h4>The server checks the token</h4>
+            <p>Before touching any data, the token is looked up. Unknown or expired token, or an account marked Inactive, and the request stops here.</p>
+            <span class="flow-where">Auth.gs → requireAuth_()</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">4</div>
+          <div class="flow-body">
+            <h4>The data is validated and written</h4>
+            <p>Name and phone are checked, a sequential ID like <code>CID-000042</code> is generated under a lock so two people saving at once can't collide, and the row is appended to the Clients tab.</p>
+            <span class="flow-where">Clients.gs → createClient() · Validation.gs · Utils.gs → generateId_()</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">5</div>
+          <div class="flow-body">
+            <h4>The write is forced to commit</h4>
+            <p><code>SpreadsheetApp.flush()</code> makes Google finish the write before replying. Without it, the very next read can run before the new row is visible.</p>
+            <span class="flow-where">Clients.gs</span>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">6</div>
+          <div class="flow-body">
+            <h4>Everything reloads together</h4>
+            <p>The browser shows a toast, then calls <code>getAppData</code> — one request returning clients, follow-ups, users, and dashboard numbers from a single read, so the counts and the lists can never disagree.</p>
+            <span class="flow-where">JavaScript.html → handleResult() → refreshAll() · Dashboard.gs → getAppData()</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DATABASE ============ -->
+    <section id="database">
+      <h2>The database</h2>
+      <p class="section-note">Four tabs in the CRM DATA spreadsheet. Column names must match exactly — the code finds columns by name, and a typo makes that field silently disappear.</p>
+
+      <h3>Clients</h3>
+      <p>One row per client. This is the heart of the system.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Column</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td class="col-file">Client_ID</td><td>Auto-generated, e.g. <code>CID-000001</code>. Never edit this.</td></tr>
+            <tr><td class="col-file">Client_Name</td><td>Required.</td></tr>
+            <tr><td class="col-file">Company</td><td>Business name.</td></tr>
+            <tr><td class="col-file">Phone</td><td>Required. Digits only — the app strips other characters.</td></tr>
+            <tr><td class="col-file">Email · Address · City · State</td><td>Contact details.</td></tr>
+            <tr><td class="col-file">Source</td><td>Where they came from. Dropdown, from Settings column B.</td></tr>
+            <tr><td class="col-file">Industry</td><td>Retailer, Distributor, Gym, etc. Dropdown, from Settings column C.</td></tr>
+            <tr><td class="col-file">Assigned_To</td><td>Which teammate owns this client.</td></tr>
+            <tr><td class="col-file">Status</td><td>New, Contacted, Active, Inactive, Lost — plus <code>Deleted</code>, which hides the row from the app.</td></tr>
+            <tr><td class="col-file">Priority</td><td>Low, Medium, High.</td></tr>
+            <tr><td class="col-file">Created_Date</td><td>Set automatically on save.</td></tr>
+            <tr><td class="col-file">Next_Followup</td><td>Updated automatically whenever a follow-up is scheduled.</td></tr>
+            <tr><td class="col-file">Notes</td><td>Free text.</td></tr>
+            <tr><td class="col-file">Order_Value · Order_Count</td><td>Revenue tracking. Feeds the Total Order Value card.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Followups</h3>
+      <p>One row per scheduled call, meeting, or visit. Linked to a client by <code>Client_ID</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Column</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td class="col-file">Followup_ID</td><td>Auto-generated, e.g. <code>FID-000007</code>.</td></tr>
+            <tr><td class="col-file">Client_ID · Client_Name</td><td>Which client this is for. The name is copied in so lists read easily.</td></tr>
+            <tr><td class="col-file">Followup_Date · Followup_Time</td><td>When it's due. Date drives Today and Overdue counts.</td></tr>
+            <tr><td class="col-file">Type</td><td>Call, Email, Meeting, Visit.</td></tr>
+            <tr><td class="col-file">Priority</td><td>Low, Medium, High.</td></tr>
+            <tr><td class="col-file">Status</td><td>Pending, Completed, Cancelled.</td></tr>
+            <tr><td class="col-file">Assigned_To · Notes · Created_Date</td><td>Owner, outcome notes, and when it was booked.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Users</h3>
+      <p>Who can sign in. <strong>Adding your first user has to be done by hand here.</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Column</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td class="col-file">User_ID</td><td>e.g. <code>UID-000001</code>.</td></tr>
+            <tr><td class="col-file">Name</td><td>Shown in the login dropdown and in Assigned To lists.</td></tr>
+            <tr><td class="col-file">Email</td><td>Their login identity. Must be unique.</td></tr>
+            <tr><td class="col-file">Role</td><td><code>Admin</code> or <code>Sales Rep</code>. Only Admins can add users.</td></tr>
+            <tr><td class="col-file">Status</td><td><code>Active</code> or <code>Inactive</code>. Inactive users can't sign in and vanish from the dropdown.</td></tr>
+            <tr><td class="col-file">Password</td><td>Type a plain password here once. On their first login it's replaced by a scrambled version automatically.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Settings</h3>
+      <p>The dropdown option lists, one per column: Statuses, Sources, Industries, Priorities, FollowupTypes, FollowupStatuses, Roles, ActiveInactive. Add a value to the bottom of a column and it becomes selectable in the sheet immediately.</p>
+
+      <div class="note warn">
+        <span class="note-label">Careful</span>
+        <p>The dropdown options shown inside the <em>web app's</em> forms are written into <code>Index.html</code> separately. Adding an option to the Settings tab makes it valid in the spreadsheet, but to offer it in the app's own form you also have to add it to Index.html.</p>
+      </div>
+    </section>
+
+    <!-- ============ FILES ============ -->
+    <section id="files">
+      <h2>Every file explained</h2>
+      <p class="section-note">What lives where. File names don't affect how the code runs — Apps Script treats every function as globally available regardless of which file it sits in.</p>
+
+      <h3>Server files (.gs)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td class="col-file">Code.gs</td><td>The front door. <code>doGet()</code> serves the page when someone opens the link; <code>include()</code> stitches the CSS and JavaScript files into it.</td></tr>
+            <tr><td class="col-file">Auth.gs</td><td>Login, password scrambling, session tokens, and the <code>requireAuth_()</code> check that guards every other function.</td></tr>
+            <tr><td class="col-file">Utils.gs</td><td>Shared plumbing: finding a sheet, turning rows into records, converting dates to text, generating IDs, standard success/failure replies.</td></tr>
+            <tr><td class="col-file">Validation.gs</td><td>Checks required fields, phone numbers, and email format before anything is saved.</td></tr>
+            <tr><td class="col-file">Clients.gs</td><td>Create, read, update, and delete clients.</td></tr>
+            <tr><td class="col-file">Followups.gs</td><td>Create, complete, and cancel follow-ups; the "due today" and "overdue" queries.</td></tr>
+            <tr><td class="col-file">Users.gs</td><td>Reads the team list; lets an Admin add teammates from inside the app.</td></tr>
+            <tr><td class="col-file">Dashboard.gs</td><td><code>getAppData()</code> — the single call that loads the whole app — plus the dashboard number crunching.</td></tr>
+            <tr><td class="col-file">Triggers.gs</td><td>The scaffolding for a daily reminder scan. Built but not yet sending emails.</td></tr>
+            <tr><td class="col-file">Setup.gs</td><td>One-time. Builds the four tabs, headers, and dropdowns.</td></tr>
+            <tr><td class="col-file">AddPasswordColumn.gs<br>AddOrderFields.gs</td><td>One-time upgrades, already run. Safe to delete.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Page files (.html)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td class="col-file">Index.html</td><td>The page skeleton — login screen, panels, tables, and both pop-up forms.</td></tr>
+            <tr><td class="col-file">Sidebar.html</td><td>The left navigation.</td></tr>
+            <tr><td class="col-file">Stylesheet.html</td><td>All the styling.</td></tr>
+            <tr><td class="col-file">JavaScript.html</td><td>All browser logic: login, panel switching, loading data, drawing tables, handling forms.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note tip">
+        <span class="note-label">Why HTML files hold CSS and JavaScript</span>
+        <p>Apps Script can't serve separate <code>.css</code> or <code>.js</code> files the way a normal website does. So the styles and scripts each live inside their own HTML file, and <code>include()</code> glues all three together the moment someone opens the page.</p>
+      </div>
+    </section>
+
+    <!-- ============ LOGIN ============ -->
+    <section id="login">
+      <h2>Login &amp; security</h2>
+      <p class="section-note">How the app knows who someone is without using Google sign-in.</p>
+
+      <p>Because the app runs under your Google account, Google can't reliably tell the app who a visitor is. So the app maintains its own accounts on the Users tab.</p>
+
+      <h3>Setting someone up</h3>
+      <ol class="steps">
+        <li>Add a row on the <strong>Users</strong> tab: name, email, role, and Status set to <code>Active</code>.</li>
+        <li>Type a starting password in plain text in the <strong>Password</strong> column.</li>
+        <li>Send them the app link and that password.</li>
+        <li>The first time they sign in, the app replaces the plain password in the sheet with a scrambled version. From then on, the real password exists nowhere — not even you can read it back.</li>
+      </ol>
+
+      <h3>What happens at sign-in</h3>
+      <p>The password they type is scrambled and compared against the stored scramble. On a match, the server issues a random session token, remembers it for six hours, and sends it to the browser — which stores it and attaches it to every later request. The password itself is never stored in the browser and never travels again.</p>
+
+      <div class="note warn">
+        <span class="note-label">Worth knowing</span>
+        <p><strong>Sessions last six hours</strong>, which is Google's maximum for this kind of temporary storage. After that, people simply sign in again. To remove someone's access immediately, set their Status to <code>Inactive</code> on the Users tab — they're locked out on their very next click.</p>
+      </div>
+    </section>
+
+    <!-- ============ GOTCHAS ============ -->
+    <section id="gotchas">
+      <h2>Rules that will bite you</h2>
+      <p class="section-note">Every one of these caused a real bug during the build. They're documented here so they only cost time once.</p>
+
+      <div class="gotchas">
+        <div class="gotcha">
+          <h4>Google Apps Script cannot send dates to the browser</h4>
+          <p>This is the big one. If a response contains even a single date value anywhere inside it, the entire response silently fails and the browser receives nothing — no error, no warning, just empty screens.</p>
+          <p>This is what made the Clients and Follow-ups lists come back empty for so long, while the login screen and dashboard numbers worked perfectly. Those worked precisely because they contained no dates.</p>
+          <p class="verdict"><b>The rule:</b> every date read from a sheet must be converted to plain text before it's sent. <code>toSafeValue_()</code> in Utils.gs does this for everything. Never bypass it.</p>
+        </div>
+
+        <div class="gotcha">
+          <h4>Saving your code does not publish it</h4>
+          <p>Editing a file and pressing Ctrl+S changes what's in the editor, but the live app keeps running whatever was published last. You must explicitly publish a new snapshot.</p>
+          <p class="verdict"><b>The rule:</b> after saving, always go to Deploy → Manage deployments → pencil icon → set Version to <strong>New version</strong> → Deploy. Skipping the "New version" step silently discards your change.</p>
+        </div>
+
+        <div class="gotcha">
+          <h4>Delete doesn't delete</h4>
+          <p>Clicking Delete writes <code>Deleted</code> into that row's Status column. The row stays in your spreadsheet, but every part of the app skips it. Nothing is ever truly lost — but a row that looks perfectly normal in the sheet can be invisible in the app.</p>
+          <p class="verdict"><b>To restore a client:</b> change that row's Status from <code>Deleted</code> back to <code>New</code> in the sheet. It reappears immediately.</p>
+        </div>
+
+        <div class="gotcha">
+          <h4>Dropdown rules can reject what the code writes</h4>
+          <p>The Status column only permits New, Contacted, Active, Inactive, and Lost. Since <code>Deleted</code> isn't on that list, the dropdown rejected it and deleting failed. The delete function now clears the dropdown rule on that one cell before writing.</p>
+          <p class="verdict"><b>The rule:</b> if code writes a value into a column that has a dropdown, that value must be an allowed option — or the rule has to be cleared first.</p>
+        </div>
+
+        <div class="gotcha">
+          <h4>Re-running setup wipes your data</h4>
+          <p><code>setupDatabase()</code> clears each tab before rebuilding it. It's meant to be run exactly once, when the spreadsheet is empty.</p>
+          <p class="verdict"><b>The rule:</b> never run it again on a sheet with real data. Duplicate the spreadsheet first if you must.</p>
+        </div>
+
+        <div class="gotcha">
+          <h4>Everything loads in one request, on purpose</h4>
+          <p>Clients, follow-ups, users, and dashboard numbers all come from a single <code>getAppData()</code> call. When these were separate requests, two of them could read the sheet a moment apart and disagree — the dashboard saying "1 client" while the list showed none.</p>
+          <p class="verdict"><b>The rule:</b> keep them together. If you add a new panel, add its data to <code>getAppData()</code> rather than creating another request.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ DEPLOY ============ -->
+    <section id="deploy">
+      <h2>Publishing changes</h2>
+      <p class="section-note">The exact sequence, every time. Getting this wrong is the single most common reason a fix "doesn't work".</p>
+
+      <ol class="steps">
+        <li>Paste the new code into the matching file in the Apps Script editor. Select all first (Ctrl+A) and replace the whole file rather than editing pieces — partial edits are how mismatched versions happen.</li>
+        <li>Save with Ctrl+S. Do this for every file you changed, before deploying.</li>
+        <li>Click <strong>Deploy</strong> → <strong>Manage deployments</strong>.</li>
+        <li>Click the <strong>pencil icon</strong> on your existing deployment. Don't create a second deployment — you'd get a second link.</li>
+        <li>Open the <strong>Version</strong> dropdown and choose <strong>New version</strong>. This is the step that actually publishes your saved code.</li>
+        <li>Click <strong>Deploy</strong>. Your link stays exactly the same.</li>
+        <li>Reload the app with Ctrl+Shift+R, or open the link in a private window, so nothing cached interferes.</li>
+      </ol>
+
+      <div class="note danger">
+        <span class="note-label">If a change seems to have no effect</span>
+        <p>Nine times out of ten, step 5 was missed. Redo the sequence and watch the Version dropdown specifically — it must say "New version" before you click Deploy.</p>
+      </div>
+    </section>
+
+    <!-- ============ TASKS ============ -->
+    <section id="tasks">
+      <h2>Common tasks</h2>
+      <p class="section-note">The things you'll actually need to do month to month.</p>
+
+      <h3>Add a teammate</h3>
+      <p>Add a row on the Users tab with their name, email, Role, Status <code>Active</code>, and a starting password. Send them the app link. No deployment needed — they can sign in right away.</p>
+
+      <h3>Remove someone's access</h3>
+      <p>Set their Status to <code>Inactive</code> on the Users tab. Their next action is blocked and their name disappears from the login list. Their records stay intact.</p>
+
+      <h3>Reset a forgotten password</h3>
+      <p>Clear that person's Password cell and type a new plain password. They sign in with it once, and it's scrambled again automatically.</p>
+
+      <h3>Add a new dropdown option</h3>
+      <p>Add it to the bottom of the right column on the Settings tab. To also offer it inside the app's forms, add the same option to the matching <code>&lt;select&gt;</code> in Index.html and redeploy.</p>
+
+      <h3>Bring back a deleted client</h3>
+      <p>Find the row in the Clients tab and change Status from <code>Deleted</code> to <code>New</code>.</p>
+
+      <h3>Import a batch of clients</h3>
+      <p>Paste the rows directly into the Clients tab, matching the column order exactly. Give each row a unique <code>Client_ID</code> that continues the existing numbering, and make sure Status isn't blank or set to <code>Deleted</code>.</p>
+    </section>
+
+    <!-- ============ TROUBLESHOOTING ============ -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <p class="section-note">Symptoms mapped to the causes actually found during the build.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Symptom</th><th>Most likely cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Lists are empty but the sheet has rows</td>
+              <td>A date is being sent to the browser, killing the response</td>
+              <td>Confirm <code>toSafeValue_()</code> is applied in <code>sheetToObjects_()</code></td>
+            </tr>
+            <tr>
+              <td>A change you made has no effect</td>
+              <td>Deployed without choosing "New version"</td>
+              <td>Redo the deploy sequence, watching the Version dropdown</td>
+            </tr>
+            <tr>
+              <td>One client is missing from the list</td>
+              <td>That row's Status says <code>Deleted</code></td>
+              <td>Change it back to <code>New</code> in the sheet</td>
+            </tr>
+            <tr>
+              <td>Dashboard count disagrees with the list</td>
+              <td>Data fetched in separate requests</td>
+              <td>Load everything through <code>getAppData()</code></td>
+            </tr>
+            <tr>
+              <td>Whole page is blank</td>
+              <td>The page is missing an element the script expects</td>
+              <td>Replace Index, Stylesheet, and JavaScript together as a set</td>
+            </tr>
+            <tr>
+              <td>"Your session has expired"</td>
+              <td>Past the six-hour session limit</td>
+              <td>Reload and sign in again</td>
+            </tr>
+            <tr>
+              <td>Teammate sees a permission error</td>
+              <td>Deployment set to "User accessing the web app"</td>
+              <td>Set Execute as to <strong>Me</strong>, then deploy a new version</td>
+            </tr>
+            <tr>
+              <td>Duplicate record from one save</td>
+              <td>Double-click before the button locked</td>
+              <td>Already fixed — the Save button locks during saving</td>
+            </tr>
+            <tr>
+              <td>Saving fails on a dropdown column</td>
+              <td>The value isn't an allowed option</td>
+              <td>Add it to the Settings tab, or clear the rule on that cell</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note tip">
+        <span class="note-label">Finding the real error</span>
+        <p>Two places tell you the truth. In the app, the message bar at the bottom of the screen carries the actual error text. In the Apps Script editor, the <strong>Executions</strong> panel in the left sidebar logs every server call your app has made, including what failed and why.</p>
+      </div>
+    </section>
+
+  </article>
+
+  <footer>
+    Quick CRM · Alpino Health Foods · Built on Google Sheets and Apps Script. Keep this handbook next to the spreadsheet — it explains the parts the code can't.
+  </footer>
+
+</div>
+
+</body>
+</html>
