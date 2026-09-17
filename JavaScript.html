@@ -1,0 +1,1654 @@
+<script>
+  // Shows a red banner at the top of the page if anything breaks — so you
+  // can see the exact error without opening DevTools next time.
+  window.onerror = function (message, source, lineno) {
+    var banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#b3261e;color:#fff;' +
+      'padding:10px 16px;font-family:monospace;font-size:13px;z-index:99999;white-space:pre-wrap;';
+    banner.textContent = 'App error: ' + message + ' (around line ' + lineno + ' of ' + (source ? source.split('/').pop() : '?') + ')';
+    document.body.appendChild(banner);
+    return false;
+  };
+
+  var state = { token: null, user: null, availableUsers: [], clients: [], followups: [], users: [], imports: [] };
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  /** Safely wires an event listener — if the element isn't on the page, this
+   *  logs a warning instead of crashing the whole app (which is what a plain
+   *  document.getElementById(id).addEventListener(...) would do if id is missing). */
+  function on(id, evt, fn) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.addEventListener(evt, fn);
+    } else {
+      console.warn('Missing element on page: #' + id + ' (tried to wire "' + evt + '")');
+    }
+  }
+
+  // ---------- Where the session is kept ----------
+  // sessionStorage is deliberate: it survives a reload (including Ctrl+Shift+R),
+  // but is cleared the moment the tab or browser is closed. That's exactly the
+  // behaviour we want — stay signed in while you're working, sign in again when
+  // you come back fresh. Every access is wrapped, because some browser privacy
+  // settings block storage inside an embedded page and would otherwise throw.
+  var TOKEN_KEY = 'crm_session_token';
+
+  function saveToken(token) {
+    try { window.sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+  }
+  function readToken() {
+    try { return window.sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+  }
+  function clearToken() {
+    try { window.sessionStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    // Older versions kept it here — clear it too, so nothing lingers.
+    try { window.localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  }
+
+  function init() {
+    wireLoginForm();
+    wireLogout();
+
+    var savedToken = readToken();
+    if (!savedToken) {
+      loadUserList();
+      return;
+    }
+
+    callServer('getSessionUser', [savedToken]).then(function (user) {
+      if (user) {
+        state.token = savedToken;
+        state.user = user;
+        enterApp();
+      } else {
+        // The server actually said this session is no longer valid.
+        clearToken();
+        loadUserList();
+      }
+    }).catch(function (err) {
+      // A network hiccup or a slow response is NOT proof the session is bad.
+      // Throwing the token away here was signing people out for no reason —
+      // keep it, and just show the login screen for this attempt.
+      console.warn('Could not check the saved session:', err);
+      loadUserList();
+    });
+  }
+
+  function loadUserList() {
+    var select = document.getElementById('login-select');
+    var errEl = document.getElementById('login-error');
+    if (select) select.innerHTML = '<option value="">Loading users...</option>';
+    if (errEl) errEl.textContent = '';
+
+    callServer('getActiveUserList', []).then(function (users) {
+      state.availableUsers = users || [];
+      populateLoginSelect(state.availableUsers);
+    }).catch(function (err) {
+      if (select) select.innerHTML = '<option value="">Failed to load users</option>';
+      if (errEl) errEl.textContent = 'Could not load users: ' + ((err && err.message) || err);
+    });
+  }
+
+  /** Raw google.script.run wrapped as a Promise — used for calls that happen before we have a session token yet. */
+  function callServer(fnName, args) {
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function (err) { reject(err); })[fnName].apply(null, args);
+    });
+  }
+
+  /** Every authenticated call goes through here — it automatically sends the current session token as the first argument. */
+  function run(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return callServer(fnName, [state.token].concat(args));
+  }
+
+  // ---------- Login ----------
+  function populateLoginSelect(users) {
+    var select = document.getElementById('login-select');
+    if (!select) return;
+    if (!users || users.length === 0) {
+      select.innerHTML = '<option value="">No active users found</option>';
+      var errEl = document.getElementById('login-error');
+      if (errEl) errEl.textContent = 'No active users found. Please check the Users sheet or run setupDatabase().';
+      return;
+    }
+    select.innerHTML = '<option value="">Select your name...</option>' +
+      users.map(function (u) {
+        var val = u.email || u.name || u.userId || '';
+        var label = u.name || u.email || u.userId || 'User';
+        return '<option value="' + escapeHtml(val) + '">' + escapeHtml(label) + '</option>';
+      }).join('');
+  }
+
+  function wireLoginForm() {
+    var form = document.getElementById('login-form');
+    var select = document.getElementById('login-select');
+    var passwordInput = document.getElementById('login-password');
+
+    if (select && passwordInput) {
+      select.addEventListener('change', function () {
+        if (select.value) {
+          passwordInput.focus();
+        }
+      });
+    }
+
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        submitLogin();
+      });
+    }
+
+    on('login-btn', 'click', function (e) {
+      if (!form) {
+        e.preventDefault();
+        submitLogin();
+      }
+    });
+  }
+
+  function submitLogin() {
+    var select = document.getElementById('login-select');
+    var email = select ? select.value : '';
+    var pwInput = document.getElementById('login-password');
+    var password = pwInput ? pwInput.value : '';
+    var errEl = document.getElementById('login-error');
+    var btn = document.getElementById('login-btn');
+
+    if (errEl) errEl.textContent = '';
+
+    if (!email) {
+      if (errEl) errEl.textContent = 'Please choose your name from the list.';
+      if (select) select.focus();
+      return;
+    }
+    if (!password) {
+      if (errEl) errEl.textContent = 'Please enter your password.';
+      if (pwInput) pwInput.focus();
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+    }
+
+    attemptLogin(email, password);
+  }
+
+  function attemptLogin(email, password) {
+    var btn = document.getElementById('login-btn');
+    var errEl = document.getElementById('login-error');
+    var pw = document.getElementById('login-password');
+
+    callServer('verifyLogin', [email, password]).then(function (result) {
+      state.token = result.token;
+      state.user = result;
+      saveToken(result.token);
+      enterApp();
+    }).catch(function (err) {
+      if (pw) {
+        pw.value = '';
+        pw.focus();
+      }
+      if (errEl) errEl.textContent = (err && err.message) || String(err);
+    }).then(function () {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Continue';
+      }
+    });
+  }
+
+  function enterApp() {
+    var overlay = document.getElementById('login-overlay');
+    var app = document.querySelector('.app');
+    var currentUser = document.getElementById('current-user');
+    if (overlay) overlay.classList.add('hidden');
+    if (app) app.classList.add('ready');
+    if (currentUser) currentUser.textContent = state.user.name + ' (' + state.user.role + ')';
+    // Each wiring step runs independently — if one fails, the rest still run
+    // instead of the whole app freezing (this is what fixes "one bad element
+    // blocks everything else from loading").
+    safeCall(wireNav);
+    safeCall(wireImportsPanel);
+    safeCall(populateStateOptions);
+    safeCall(wireClientModal);
+    safeCall(wireImportModal);
+    safeCall(wireFollowupModal);
+    safeCall(wireClientDetail);
+    safeCall(wireToolbars);
+    safeCall(refreshAll);
+  }
+
+  function safeCall(fn) {
+    try {
+      fn();
+    } catch (e) {
+      console.error('Error while running ' + fn.name + ':', e);
+      showToast('Something failed to load (' + fn.name + '): ' + (e.message || e), 'error');
+    }
+  }
+
+  function wireLogout() {
+    on('btn-switch-user', 'click', function (e) {
+      if (e) e.preventDefault();
+      showLoginScreen();
+    });
+  }
+
+  function showLoginScreen() {
+    state.token = null;
+    state.user = null;
+    clearToken();
+
+    var overlay = document.getElementById('login-overlay');
+    var app = document.querySelector('.app');
+    var pw = document.getElementById('login-password');
+    var errEl = document.getElementById('login-error');
+    var currentUser = document.getElementById('current-user');
+    var btn = document.getElementById('login-btn');
+
+    if (app) app.classList.remove('ready');
+    if (overlay) overlay.classList.remove('hidden');
+    if (pw) pw.value = '';
+    if (errEl) errEl.textContent = '';
+    if (currentUser) currentUser.textContent = '';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Continue';
+    }
+
+    loadUserList();
+  }
+
+  function showToast(message, type) {
+    var toast = document.getElementById('toast');
+    if (!toast) { console.warn(message); return; }
+    toast.textContent = message;
+    toast.className = 'toast show' + (type === 'error' ? ' error' : '');
+    setTimeout(function () { toast.className = 'toast'; }, 3200);
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  // ---------- Navigation ----------
+  function wireNav() {
+    var links = document.querySelectorAll('.nav-link');
+    var panels = document.querySelectorAll('.panel');
+    var pageTitle = document.getElementById('page-title');
+
+    links.forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        var target = link.getAttribute('data-panel');
+        links.forEach(function (l) { l.classList.remove('active'); });
+        link.classList.add('active');
+        panels.forEach(function (p) { p.classList.toggle('active', p.id === 'panel-' + target); });
+        if (pageTitle) pageTitle.textContent = link.textContent;
+      });
+    });
+  }
+
+  // ---------- Data loading ----------
+  // Everything loads in ONE call (getAppData) so the Dashboard numbers and
+  // the Clients/Follow-ups lists are always computed from the exact same
+  // read of the sheet — fetching them as separate calls could occasionally
+  // have them disagree with each other (e.g. "Total Clients: 1" but an
+  // empty Clients list), because two separate requests can land a moment
+  // apart. If the call fails, every section shows the real error instead
+  // of silently staying blank.
+  function refreshAll() {
+    run('getAppData').then(function (data) {
+      data = data || {};
+      state.clients = data.clients || [];
+      state.followups = data.followups || [];
+      state.users = data.users || [];
+      state.imports = data.imports || [];
+      state.sheetInfo = {
+        clientRowsInSheet: data.clientRowsInSheet,
+        deletedClientRows: data.deletedClientRows
+      };
+      renderDashboard({
+        totalClients: data.totalClients,
+        activeClients: data.activeClients,
+        newThisMonth: data.newThisMonth,
+        followupsToday: data.followupsToday,
+        overdue: data.overdue,
+        completedThisWeek: data.completedThisWeek
+      });
+      renderClients();
+      renderFollowups();
+      renderImports();
+      populateFollowupClientOptions();
+      populateCitySuggestions();
+
+      // If the client card is open while this refresh lands — you completed a
+      // call from the card, say — redraw it so the new note appears straight
+      // away instead of only after you close and reopen it.
+      var detailOverlay = document.getElementById('client-detail-overlay');
+      if (detailOverlay && detailOverlay.classList.contains('open') && detailClientId) {
+        openClientDetail(detailClientId);
+      }
+    }).catch(function (err) {
+      showSectionError('clients-tbody', 'clients-empty', err);
+      showSectionError('followups-tbody', 'followups-empty', err);
+      handleApiError(err, 'Could not load app data');
+    });
+  }
+
+  /** Shows the real backend error message inside a table's empty-state area, in red, instead of leaving it blank or generic. */
+  function showSectionError(tbodyId, emptyId, err) {
+    var tbody = document.getElementById(tbodyId);
+    var empty = document.getElementById(emptyId);
+    if (tbody) tbody.innerHTML = '';
+    if (empty) {
+      empty.style.display = 'block';
+      empty.style.color = '#a13f3f';
+      empty.textContent = 'Could not load data: ' + ((err && err.message) || err);
+    }
+  }
+
+  // ---------- Date helpers (client-side) ----------
+  function toDateObj(v) {
+    if (!v) return null;
+    var d = (v instanceof Date) ? v : new Date(v);
+    return isNaN(d) ? null : d;
+  }
+  function toYMD(v) {
+    var d = toDateObj(v);
+    if (!d) return '';
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+  function todayYMD() { return toYMD(new Date()); }
+  function fmtDate(v) {
+    var d = toDateObj(v);
+    if (!d) return '';
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+  function badgeClass(prefix, value) {
+    return 'badge ' + prefix + '-' + String(value || '').toLowerCase().replace(/\s+/g, '-');
+  }
+
+  // ---------- Dashboard ----------
+  function renderDashboard(stats) {
+    var grid = document.getElementById('stat-grid');
+    if (!grid) return;
+    stats = stats || {};
+    var n = function (v) { return Number(v) || 0; }; // never show "undefined" — fall back to 0
+    var cards = [
+      { label: 'Total Clients', value: n(stats.totalClients) },
+      { label: 'Active Clients', value: n(stats.activeClients) },
+      { label: 'New This Month', value: n(stats.newThisMonth) },
+      { label: 'Follow-ups Today', value: n(stats.followupsToday) },
+      { label: 'Overdue Follow-ups', value: n(stats.overdue), warn: n(stats.overdue) > 0 },
+      { label: 'Completed This Week', value: n(stats.completedThisWeek) }
+    ];
+    grid.innerHTML = cards.map(function (c) {
+      return '<div class="stat-card' + (c.warn ? ' risk' : '') + '">' +
+        '<div class="stat-value">' + c.value + '</div>' +
+        '<div class="stat-label">' + c.label + '</div></div>';
+    }).join('');
+  }
+
+  // ---------- Imports ----------
+  function renderImports() {
+    var tbody = document.getElementById('imports-tbody');
+    if (!tbody) return;
+
+    var rows = state.imports || [];
+    var empty = document.getElementById('imports-empty');
+    if (empty) empty.style.display = rows.length ? 'none' : 'block';
+
+    tbody.innerHTML = rows.map(function (imp) {
+      var rolledBack = String(imp.Status) === 'Rolled back';
+      var skipped = (Number(imp.Skipped_Duplicates) || 0) + (Number(imp.Skipped_Invalid) || 0);
+
+      var actions =
+        '<button class="btn-link edit" data-details="' + escapeHtml(imp.Import_ID) + '">Details</button>' +
+        (rolledBack ? '' : '<button class="btn-link delete" data-undo="' + escapeHtml(imp.Import_ID) + '">Undo</button>');
+
+      return '<tr' + (rolledBack ? ' style="opacity:0.55;"' : '') + '>' +
+        '<td>' + escapeHtml(imp.File_Name || '(unnamed)') +
+          (imp.Sheet_Name ? '<br><span style="font-size:0.75rem;color:#8b9791;">sheet: ' + escapeHtml(imp.Sheet_Name) + '</span>' : '') +
+        '</td>' +
+        '<td>' + escapeHtml(imp.Imported_At || '') + '</td>' +
+        '<td>' + escapeHtml(imp.Imported_By || '') + '</td>' +
+        '<td><strong>' + (Number(imp.Imported_Count) || 0) + '</strong></td>' +
+        '<td>' + (skipped > 0 ? '<span class="badge badge-high">' + skipped + '</span>' : '—') + '</td>' +
+        '<td>' + (rolledBack
+            ? '<span class="badge badge-lost">Rolled back</span>'
+            : '<span class="badge badge-active">Active</span>') + '</td>' +
+        '<td class="row-actions">' + actions + '</td></tr>';
+    }).join('');
+
+    tbody.querySelectorAll('[data-details]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showImportDetails(btn.getAttribute('data-details'));
+      });
+    });
+
+    tbody.querySelectorAll('[data-undo]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-undo');
+        if (!confirm('Undo this import?\n\nEvery client that came from this file will be removed from your lists. They stay in the sheet marked Deleted, so this can be reversed.')) return;
+        btn.disabled = true;
+        run('undoImport', id)
+          .then(function (res) { handleResult(res); })
+          .catch(function (err) { showToast(String(err), 'error'); btn.disabled = false; });
+      });
+    });
+  }
+
+  function showImportDetails(importId) {
+    var overlay = document.getElementById('import-details-overlay');
+    var tbody = document.getElementById('import-details-tbody');
+    var summary = document.getElementById('import-details-summary');
+    var empty = document.getElementById('import-details-empty');
+    var title = document.getElementById('import-details-title');
+    if (!overlay || !tbody) return;
+
+    tbody.innerHTML = '';
+    if (summary) summary.textContent = 'Loading...';
+    if (empty) empty.style.display = 'none';
+    overlay.classList.add('open');
+
+    run('getImportDetails', importId).then(function (d) {
+      if (title) title.textContent = d.File_Name || 'Import Details';
+
+      var skipped = d.skipped || [];
+      if (summary) {
+        summary.innerHTML =
+          '<strong>' + d.Imported_Count + '</strong> imported &nbsp;·&nbsp; ' +
+          '<strong>' + d.Skipped_Duplicates + '</strong> already in the CRM &nbsp;·&nbsp; ' +
+          '<strong>' + d.Skipped_Invalid + '</strong> missing a name or valid phone';
+      }
+
+      if (empty) empty.style.display = skipped.length ? 'none' : 'block';
+
+      tbody.innerHTML = skipped.map(function (s) {
+        return '<tr>' +
+          '<td>' + escapeHtml(String(s.row)) + '</td>' +
+          '<td>' + escapeHtml(s.name) + '</td>' +
+          '<td>' + escapeHtml(s.phone) + '</td>' +
+          '<td>' + escapeHtml(s.reason) + '</td></tr>';
+      }).join('');
+    }).catch(function (err) {
+      if (summary) summary.textContent = 'Could not load details: ' + (err.message || err);
+    });
+  }
+
+  function wireImportsPanel() {
+    on('btn-close-import-details', 'click', function () {
+      var overlay = document.getElementById('import-details-overlay');
+      if (overlay) overlay.classList.remove('open');
+    });
+  }
+
+  // ---------- City & State suggestions ----------
+  var INDIAN_STATES = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+    'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+    'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+    'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+    'Andaman and Nicobar Islands', 'Chandigarh',
+    'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Jammu and Kashmir',
+    'Ladakh', 'Lakshadweep', 'Puducherry'
+  ];
+
+  // Starter list. Any city already used by an existing client is added to this
+  // automatically, so the suggestions get better the more clients you add.
+  var STARTER_CITIES = [
+    'Indore', 'Bhopal', 'Jabalpur', 'Gwalior', 'Ujjain', 'Ratlam', 'Dewas', 'Sagar',
+    'Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Thane', 'Aurangabad',
+    'Delhi', 'Noida', 'Gurugram', 'Faridabad', 'Ghaziabad',
+    'Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Gandhinagar',
+    'Bengaluru', 'Mysuru', 'Hubballi',
+    'Chennai', 'Coimbatore', 'Madurai',
+    'Hyderabad', 'Warangal', 'Visakhapatnam', 'Vijayawada',
+    'Kolkata', 'Howrah', 'Siliguri',
+    'Jaipur', 'Jodhpur', 'Udaipur', 'Kota',
+    'Lucknow', 'Kanpur', 'Varanasi', 'Agra', 'Prayagraj', 'Meerut',
+    'Chandigarh', 'Ludhiana', 'Amritsar', 'Jalandhar',
+    'Patna', 'Ranchi', 'Raipur', 'Bhubaneswar', 'Guwahati',
+    'Kochi', 'Thiruvananthapuram', 'Dehradun', 'Shimla', 'Panaji'
+  ];
+
+  /** Fills the State dropdown. Runs once, when the app opens. */
+  function populateStateOptions() {
+    var select = document.getElementById('client-state');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select state...</option>' +
+      INDIAN_STATES.map(function (s) {
+        return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>';
+      }).join('');
+  }
+
+  /**
+   * Selects a value in a dropdown. If the saved value isn't one of the options
+   * (an older record with a different spelling, say), it's added rather than
+   * silently cleared — so editing a client can never wipe out their state.
+   */
+  function setSelectValue(selectId, value) {
+    var select = document.getElementById(selectId);
+    if (!select) return;
+    var wanted = String(value || '');
+    if (wanted) {
+      var exists = Array.prototype.some.call(select.options, function (o) { return o.value === wanted; });
+      if (!exists) {
+        var opt = document.createElement('option');
+        opt.value = wanted;
+        opt.textContent = wanted;
+        select.appendChild(opt);
+      }
+    }
+    select.value = wanted;
+  }
+
+  /** Rebuilds the City suggestions: the starter list plus every city already on file. */
+  function populateCitySuggestions() {
+    var list = document.getElementById('city-suggestions');
+    if (!list) return;
+
+    var seen = {};
+    var cities = [];
+    STARTER_CITIES.concat(
+      (state.clients || []).map(function (c) { return c.City; })
+    ).forEach(function (city) {
+      var name = String(city || '').trim();
+      if (!name) return;
+      var key = name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      cities.push(name);
+    });
+
+    cities.sort();
+    list.innerHTML = cities.map(function (c) {
+      return '<option value="' + escapeHtml(c) + '"></option>';
+    }).join('');
+  }
+
+  // ---------- Clients ----------
+  function currentClientFilters() {
+    var searchEl = document.getElementById('client-search');
+    var statusEl = document.getElementById('client-status-filter');
+    var fromEl = document.getElementById('client-date-from');
+    var toEl = document.getElementById('client-date-to');
+    return {
+      search: (searchEl ? searchEl.value : '').trim().toLowerCase(),
+      status: statusEl ? statusEl.value : '',
+      dateFrom: fromEl ? fromEl.value : '',
+      dateTo: toEl ? toEl.value : ''
+    };
+  }
+
+  /**
+   * Turns the date preset (Today, Last 7 days, This month...) into an actual
+   * from/to pair and fills the two date boxes, so what's being filtered is
+   * always visible rather than hidden behind the preset name.
+   */
+  function applyDatePreset() {
+    var preset = document.getElementById('client-date-preset');
+    var rangeWrap = document.getElementById('client-date-range');
+    var fromEl = document.getElementById('client-date-from');
+    var toEl = document.getElementById('client-date-to');
+    if (!preset || !fromEl || !toEl) return;
+
+    var value = preset.value;
+    if (rangeWrap) rangeWrap.style.display = value ? 'inline-flex' : 'none';
+
+    // Custom leaves whatever the user typed alone.
+    if (value === 'custom') return;
+
+    if (!value) {
+      fromEl.value = '';
+      toEl.value = '';
+      return;
+    }
+
+    var today = new Date();
+    var from = new Date();
+    var to = new Date();
+
+    if (value === 'today') {
+      // from and to are both today
+    } else if (value === 'yesterday') {
+      from.setDate(today.getDate() - 1);
+      to.setDate(today.getDate() - 1);
+    } else if (value === '7' || value === '30') {
+      from.setDate(today.getDate() - (parseInt(value, 10) - 1));
+    } else if (value === 'thismonth') {
+      from = new Date(today.getFullYear(), today.getMonth(), 1);
+    } else if (value === 'lastmonth') {
+      from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      to = new Date(today.getFullYear(), today.getMonth(), 0); // last day of previous month
+    }
+
+    fromEl.value = toYMD(from);
+    toEl.value = toYMD(to);
+  }
+
+  // ---------- Notes helpers ----------
+  //
+  // Three different notes exist in this system and they are easy to confuse:
+  //
+  //   Client.Notes            — what you typed on the Add/Edit Client form.
+  //                             One per client, about the client generally.
+  //   Followup.Notes          — what you typed when SCHEDULING a call
+  //                             ("ask about the 1kg pack"). The plan.
+  //   Followup.Outcome_Notes  — what you typed AFTER the call, when you hit
+  //                             Complete. What actually happened.
+  //
+  // Older follow-ups, completed before Outcome_Notes existed, have the last
+  // two squashed into Notes joined by a "|". Everything below reads either
+  // shape, so nothing recorded in the past is lost.
+
+  /** Every follow-up belonging to one client, newest date first. */
+  function followupsForClient(clientId) {
+    return (state.followups || []).filter(function (f) {
+      return String(f.Client_ID) === String(clientId);
+    }).sort(function (a, b) {
+      return toYMD(a.Followup_Date) > toYMD(b.Followup_Date) ? -1 : 1;
+    });
+  }
+
+  /**
+   * The outcome note of a follow-up, or '' if there isn't one.
+   * Falls back to the old "plan | outcome" format for historic rows.
+   */
+  function outcomeNoteOf(f) {
+    if (f.Outcome_Notes) return String(f.Outcome_Notes);
+    var raw = String(f.Notes || '');
+    var bar = raw.indexOf('|');
+    return bar > -1 ? raw.slice(bar + 1).trim() : '';
+  }
+
+  /** The note written when the follow-up was scheduled, with no outcome glued on. */
+  function planNoteOf(f) {
+    var raw = String(f.Notes || '');
+    if (f.Outcome_Notes) return raw.trim();
+    var bar = raw.indexOf('|');
+    return bar > -1 ? raw.slice(0, bar).trim() : raw.trim();
+  }
+
+  /** Newest call outcome recorded against a client, or '' if never called. */
+  function lastOutcomeForClient(clientId) {
+    var done = followupsForClient(clientId).filter(function (f) { return f.Status === 'Completed'; });
+    for (var i = 0; i < done.length; i++) {
+      var note = outcomeNoteOf(done[i]);
+      if (note) return note;
+    }
+    return '';
+  }
+
+  /**
+   * Builds the Notes cell for one row of the Clients table.
+   * Prefers the client's own note; if there isn't one, shows the latest call
+   * outcome instead (marked with a phone icon) so the column still earns its
+   * space for the imported leads that were never given a note by hand.
+   */
+  function noteCellFor(c) {
+    var own = String(c.Notes || '').trim();
+    if (own) return { full: own, html: escapeHtml(own) };
+
+    var outcome = lastOutcomeForClient(c.Client_ID);
+    if (outcome) {
+      return {
+        full: 'Last call: ' + outcome,
+        html: '<span class="note-outcome">' + escapeHtml(outcome) + '</span>'
+      };
+    }
+    return { full: '', html: '<span class="note-empty">—</span>' };
+  }
+
+  function renderClients() {
+    var f = currentClientFilters();
+    var rows = (state.clients || []).filter(function (c) {
+      var matchesSearch = !f.search ||
+        String(c.Client_Name).toLowerCase().indexOf(f.search) > -1 ||
+        String(c.Company).toLowerCase().indexOf(f.search) > -1 ||
+        String(c.Phone).toLowerCase().indexOf(f.search) > -1;
+      var matchesStatus = !f.status || c.Status === f.status;
+
+      // Compare on the date part only — a record saved at 14:30 must still
+      // count as "on" its own day when that day is the end of the range.
+      var added = toYMD(c.Created_Date);
+      var matchesDate =
+        (!f.dateFrom || (added && added >= f.dateFrom)) &&
+        (!f.dateTo   || (added && added <= f.dateTo));
+
+      return matchesSearch && matchesStatus && matchesDate;
+    });
+
+    var tbody = document.getElementById('clients-tbody');
+    if (!tbody) return;
+    var empty = document.getElementById('clients-empty');
+    if (empty) {
+      empty.style.display = rows.length ? 'none' : 'block';
+      if (!rows.length) {
+        var info = state.sheetInfo || {};
+        var hidden = Number(info.deletedClientRows) || 0;
+        if (hidden > 0) {
+          // Rows DO exist in the sheet, they're just marked as deleted.
+          empty.style.color = '#a6631f';
+          empty.textContent = 'No active clients to show. ' + hidden + ' row(s) in your Clients sheet ' +
+            'are marked Status = "Deleted", so they stay hidden here. To bring one back, open the ' +
+            'Clients tab in your Google Sheet, find that row\'s Status column, and change "Deleted" to "New".';
+        } else {
+          empty.style.color = '';
+          empty.textContent = 'No clients yet — click "+ Add Client" to create the first one.';
+        }
+      }
+    }
+
+    tbody.innerHTML = rows.map(function (c) {
+      var note = noteCellFor(c);
+      return '<tr>' +
+        '<td><button class="client-name-link" data-detail="' + c.Client_ID + '">' +
+          escapeHtml(c.Client_Name) + '</button></td>' +
+        '<td class="cell-clip" title="' + escapeHtml(c.Company) + '">' + escapeHtml(c.Company) + '</td>' +
+        '<td>' + escapeHtml(c.Phone) + '</td>' +
+        '<td><span class="' + badgeClass('badge', c.Status) + '">' + escapeHtml(c.Status) + '</span></td>' +
+        '<td><span class="' + badgeClass('badge', c.Priority) + '">' + escapeHtml(c.Priority) + '</span></td>' +
+        '<td>' + (c.Created_Date ? fmtDate(c.Created_Date) : '—') + '</td>' +
+        '<td>' + (c.Next_Followup ? fmtDate(c.Next_Followup) : '—') + '</td>' +
+        '<td class="cell-note" title="' + escapeHtml(note.full) + '">' + note.html + '</td>' +
+        '<td class="row-actions">' +
+          '<button class="btn-link followup" data-id="' + c.Client_ID + '">Follow-up</button>' +
+          '<button class="btn-link edit" data-id="' + c.Client_ID + '">Edit</button>' +
+          '<button class="btn-link delete" data-id="' + c.Client_ID + '">Delete</button>' +
+        '</td></tr>';
+    }).join('');
+
+    tbody.querySelectorAll('[data-detail]').forEach(function (btn) {
+      btn.addEventListener('click', function () { openClientDetail(btn.getAttribute('data-detail')); });
+    });
+    tbody.querySelectorAll('.followup').forEach(function (btn) {
+      btn.addEventListener('click', function () { openFollowupModal(btn.getAttribute('data-id')); });
+    });
+    tbody.querySelectorAll('.edit').forEach(function (btn) {
+      btn.addEventListener('click', function () { openClientModal(btn.getAttribute('data-id')); });
+    });
+    tbody.querySelectorAll('.delete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        if (!confirm('Remove this client? This can be undone later on the sheet, but they will disappear from this list.')) return;
+        run('deleteClient', id).then(function (res) { handleResult(res); }).catch(function (err) { handleApiError(err); });
+      });
+    });
+  }
+
+  /**
+   * Opens the Schedule Follow-up form.
+   *
+   * Pass a clientId (from the Follow-up button on a client's row) and that
+   * client is pre-selected and named in the heading, with the date defaulted
+   * to today — so booking a call from the Clients list is one click and a
+   * Save, with no hunting through a dropdown of a thousand names.
+   *
+   * Called with nothing (the "+ Schedule Follow-up" buttons) it just opens
+   * the empty form as before.
+   */
+  function openFollowupModal(clientId) {
+    var overlay = document.getElementById('followup-modal-overlay');
+    var form = document.getElementById('followup-form');
+    var title = document.getElementById('followup-modal-title');
+    if (!overlay || !form) return;
+
+    form.reset();
+
+    var dateEl = document.getElementById('followup-date');
+    if (dateEl) dateEl.value = todayYMD();
+
+    var clientSelect = document.getElementById('followup-client');
+    if (clientId && clientSelect) {
+      clientSelect.value = clientId;
+
+      var client = (state.clients || []).filter(function (c) {
+        return String(c.Client_ID) === String(clientId);
+      })[0];
+
+      if (title) {
+        title.textContent = client
+          ? 'Schedule Follow-up — ' + client.Client_Name
+          : 'Schedule Follow-up';
+      }
+    } else if (title) {
+      title.textContent = 'Schedule Follow-up';
+    }
+
+    overlay.classList.add('open');
+  }
+
+  function populateFollowupClientOptions() {
+    var options = (state.clients || []).map(function (c) {
+      return '<option value="' + c.Client_ID + '">' + escapeHtml(c.Client_Name) + (c.Company ? ' — ' + escapeHtml(c.Company) : '') + '</option>';
+    }).join('');
+    var el = document.getElementById('followup-client');
+    if (el) el.innerHTML = options;
+  }
+
+  function wireToolbars() {
+    on('client-search', 'input', renderClients);
+    on('client-status-filter', 'change', renderClients);
+    on('client-date-preset', 'change', function () { applyDatePreset(); renderClients(); });
+    on('client-date-from', 'change', renderClients);
+    on('client-date-to', 'change', renderClients);
+    on('followup-filter', 'change', renderFollowups);
+  }
+
+  function wireClientModal() {
+    var overlay = document.getElementById('client-modal-overlay');
+    var form = document.getElementById('client-form');
+    if (!overlay || !form) { console.warn('Client modal elements missing on the page — skipping wireClientModal.'); return; }
+
+    on('btn-add-client', 'click', function () { openClientModal(null); });
+    on('btn-add-client-dash', 'click', function () { openClientModal(null); });
+    on('btn-cancel-client', 'click', function () { overlay.classList.remove('open'); });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      // Block a second click while the first save is still in flight —
+      // this is what was causing duplicate client records.
+      if (form.dataset.submitting === 'true') return;
+      form.dataset.submitting = 'true';
+      var submitBtn = form.querySelector('button[type="submit"]');
+      var originalLabel = submitBtn ? submitBtn.textContent : '';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving...'; }
+
+      var id = document.getElementById('client-id').value;
+      var payload = {
+        Client_Name: document.getElementById('client-name').value,
+        Company: document.getElementById('client-company').value,
+        Phone: document.getElementById('client-phone').value,
+        Email: document.getElementById('client-email').value,
+        Address: document.getElementById('client-address').value,
+        City: document.getElementById('client-city').value,
+        State: document.getElementById('client-state').value,
+        Source: document.getElementById('client-source').value,
+        Industry: document.getElementById('client-industry').value,
+        Status: document.getElementById('client-status').value,
+        Priority: document.getElementById('client-priority').value,
+        Assigned_To: (state.user && state.user.name) || '',
+        Notes: document.getElementById('client-notes').value
+      };
+      var call = id ? run('updateClient', id, payload) : run('createClient', payload);
+      call.then(function (res) {
+        if (res.success) overlay.classList.remove('open');
+        handleResult(res);
+      }).catch(function (err) {
+        handleApiError(err);
+      }).then(function () {
+        form.dataset.submitting = 'false';
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
+      });
+    });
+  }
+
+  function openClientModal(clientId) {
+    var overlay = document.getElementById('client-modal-overlay');
+    var title = document.getElementById('client-modal-title');
+    var form = document.getElementById('client-form');
+    var idField = document.getElementById('client-id');
+    if (!overlay || !title || !form || !idField) {
+      console.warn('Cannot open client modal — a required element is missing from the page.');
+      showToast('Could not open the Add Client form (page is out of date — try a hard refresh).', 'error');
+      return;
+    }
+    form.reset();
+    idField.value = clientId || '';
+
+    if (clientId) {
+      var c = (state.clients || []).filter(function (x) { return x.Client_ID === clientId; })[0];
+      title.textContent = 'Edit Client';
+      if (c) {
+        document.getElementById('client-name').value = c.Client_Name || '';
+        document.getElementById('client-company').value = c.Company || '';
+        document.getElementById('client-phone').value = c.Phone || '';
+        document.getElementById('client-email').value = c.Email || '';
+        document.getElementById('client-address').value = c.Address || '';
+        document.getElementById('client-city').value = c.City || '';
+        setSelectValue('client-state', c.State);
+        document.getElementById('client-source').value = c.Source || 'Referral';
+        document.getElementById('client-industry').value = c.Industry || 'Retailer';
+        document.getElementById('client-status').value = c.Status || 'New';
+        document.getElementById('client-priority').value = c.Priority || 'Medium';
+        document.getElementById('client-notes').value = c.Notes || '';
+      }
+    } else {
+      title.textContent = 'Add Client';
+    }
+    overlay.classList.add('open');
+  }
+
+  // ---------- Follow-ups ----------
+  function renderFollowups() {
+    var filterEl = document.getElementById('followup-filter');
+    if (!filterEl) return;
+    var filter = filterEl.value;
+    var rows = (state.followups || []).filter(function (f) {
+      if (filter === 'all') return true;
+      if (f.Status !== 'Pending') return false;
+      var d = toYMD(f.Followup_Date);
+      if (filter === 'today') return d === todayYMD();
+      if (filter === 'overdue') return d && d < todayYMD();
+      return true;
+    });
+
+    rows.sort(function (a, b) { return toYMD(a.Followup_Date) < toYMD(b.Followup_Date) ? -1 : 1; });
+
+    var tbody = document.getElementById('followups-tbody');
+    if (!tbody) return;
+    var empty = document.getElementById('followups-empty');
+    if (empty) empty.style.display = rows.length ? 'none' : 'block';
+
+    tbody.innerHTML = rows.map(function (f) {
+      var overdue = f.Status === 'Pending' && toYMD(f.Followup_Date) < todayYMD();
+      var statusBadge = overdue ? '<span class="badge badge-overdue">Overdue</span>' :
+        '<span class="' + badgeClass('badge', f.Status) + '">' + escapeHtml(f.Status) + '</span>';
+      var actions = f.Status === 'Pending'
+        ? '<button class="btn-link complete" data-id="' + f.Followup_ID + '">Complete</button>' +
+          '<button class="btn-link delete" data-id="' + f.Followup_ID + '">Cancel</button>'
+        : '';
+      // Once a call is done, the outcome is the interesting note — that's what
+      // actually happened. While it's still pending, show the plan instead.
+      var outcome = outcomeNoteOf(f);
+      var plan = planNoteOf(f);
+      var noteHtml, noteFull;
+      if (outcome) {
+        noteHtml = '<span class="note-outcome">' + escapeHtml(outcome) + '</span>';
+        noteFull = 'Call outcome: ' + outcome + (plan ? '\n\nScheduled note: ' + plan : '');
+      } else if (plan) {
+        noteHtml = escapeHtml(plan);
+        noteFull = plan;
+      } else {
+        noteHtml = '<span class="note-empty">—</span>';
+        noteFull = '';
+      }
+
+      return '<tr>' +
+        '<td><button class="client-name-link" data-detail="' + f.Client_ID + '">' +
+          escapeHtml(f.Client_Name) + '</button></td>' +
+        '<td>' + fmtDate(f.Followup_Date) + '</td>' +
+        '<td>' + escapeHtml(f.Followup_Time) + '</td>' +
+        '<td>' + escapeHtml(f.Type) + '</td>' +
+        '<td><span class="' + badgeClass('badge', f.Priority) + '">' + escapeHtml(f.Priority) + '</span></td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td class="cell-note" title="' + escapeHtml(noteFull) + '">' + noteHtml + '</td>' +
+        '<td class="row-actions">' + actions + '</td></tr>';
+    }).join('');
+
+    tbody.querySelectorAll('[data-detail]').forEach(function (btn) {
+      btn.addEventListener('click', function () { openClientDetail(btn.getAttribute('data-detail')); });
+    });
+    tbody.querySelectorAll('.complete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        var notes = prompt('Call outcome / notes (optional):', '');
+        if (notes === null) return; // they hit Cancel
+        run('completeFollowup', id, notes).then(function (res) { handleResult(res); }).catch(function (err) { handleApiError(err); });
+      });
+    });
+    tbody.querySelectorAll('.delete').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        if (!confirm('Cancel this follow-up?')) return;
+        run('deleteFollowup', id).then(function (res) { handleResult(res); }).catch(function (err) { handleApiError(err); });
+      });
+    });
+  }
+
+  // ---------- Client detail card ----------
+  //
+  // Opened by clicking a client's name anywhere in the app. This is the one
+  // screen that shows a client's FULL note (the tables only have room for a
+  // trimmed version) together with every call ever booked for them and what
+  // came out of it.
+
+  var detailClientId = null; // remembered so the card's own buttons know who they're for
+
+  function openClientDetail(clientId) {
+    var c = (state.clients || []).filter(function (x) {
+      return String(x.Client_ID) === String(clientId);
+    })[0];
+
+    if (!c) { showToast('That client could not be found — try refreshing.', 'error'); return; }
+
+    var overlay = document.getElementById('client-detail-overlay');
+    if (!overlay) { showToast('Client card is missing from the page (try a hard refresh).', 'error'); return; }
+
+    detailClientId = c.Client_ID;
+
+    setText('detail-name', c.Client_Name);
+    setText('detail-subline', [c.Company, c.City, c.State].filter(Boolean).join(' · ') || '—');
+
+    setHtml('detail-badges',
+      '<span class="' + badgeClass('badge', c.Status) + '">' + escapeHtml(c.Status) + '</span>' +
+      '<span class="' + badgeClass('badge', c.Priority) + '">' + escapeHtml(c.Priority) + '</span>');
+
+    // The facts, in the order you'd read them off a call sheet.
+    var fields = [
+      ['Phone', c.Phone],
+      ['Email', c.Email],
+      ['Source', c.Source],
+      ['Industry', c.Industry],
+      ['Assigned To', c.Assigned_To],
+      ['Added', c.Created_Date ? fmtDate(c.Created_Date) : ''],
+      ['Next Follow-up', c.Next_Followup ? fmtDate(c.Next_Followup) : ''],
+      ['Address', c.Address]
+    ];
+    setHtml('detail-fields', fields.map(function (f) {
+      return '<div>' +
+        '<div class="detail-field-label">' + escapeHtml(f[0]) + '</div>' +
+        '<div class="detail-field-value">' + (f[1] ? escapeHtml(f[1]) : '—') + '</div>' +
+      '</div>';
+    }).join(''));
+
+    // The client's own note, in full — the thing that was being saved and
+    // never shown anywhere before.
+    var ownNote = String(c.Notes || '').trim();
+    var noteBox = document.getElementById('detail-notes');
+    if (noteBox) {
+      noteBox.className = 'detail-note-box' + (ownNote ? '' : ' empty');
+      noteBox.textContent = ownNote || 'No note was added for this client.';
+    }
+
+    renderClientHistory(c.Client_ID);
+    overlay.classList.add('open');
+  }
+
+  function renderClientHistory(clientId) {
+    var list = followupsForClient(clientId);
+    var done = list.filter(function (f) { return f.Status === 'Completed'; }).length;
+
+    setText('detail-history-count',
+      list.length ? '(' + list.length + ' total · ' + done + ' completed)' : '');
+
+    var box = document.getElementById('detail-history');
+    if (!box) return;
+
+    if (!list.length) {
+      box.innerHTML = '<div class="detail-note-box empty">No calls or follow-ups have been booked for this client yet.</div>';
+      return;
+    }
+
+    box.innerHTML = list.map(function (f) {
+      var isDone = f.Status === 'Completed';
+      var isOverdue = f.Status === 'Pending' && toYMD(f.Followup_Date) < todayYMD();
+      var cls = isDone ? 'done' : (isOverdue ? 'overdue' : '');
+      var statusLabel = isOverdue ? 'Overdue' : f.Status;
+
+      var head = '<div class="detail-history-head">' +
+        '<span>' + fmtDate(f.Followup_Date) + (f.Followup_Time ? ' · ' + escapeHtml(f.Followup_Time) : '') + '</span>' +
+        '<span class="' + badgeClass('badge', isOverdue ? 'Overdue' : f.Status) + '">' + escapeHtml(statusLabel) + '</span>' +
+        '<span class="detail-history-meta">' +
+          escapeHtml(f.Type || 'Call') +
+          (f.Assigned_To ? ' · ' + escapeHtml(f.Assigned_To) : '') +
+        '</span>' +
+      '</div>';
+
+      var plan = planNoteOf(f);
+      var outcome = outcomeNoteOf(f);
+      var notes = '';
+
+      if (plan) {
+        notes += '<div class="detail-history-note plan">' +
+          '<span class="note-tag">Planned</span>' + escapeHtml(plan) + '</div>';
+      }
+      if (outcome) {
+        notes += '<div class="detail-history-note">' +
+          '<span class="note-tag">Call outcome</span>' + escapeHtml(outcome) + '</div>';
+      }
+      if (!plan && !outcome && isDone) {
+        notes = '<div class="detail-history-note plan">' +
+          '<span class="note-tag">Call outcome</span>Completed with no note.</div>';
+      }
+
+      return '<div class="detail-history-item ' + cls + '">' + head + notes + '</div>';
+    }).join('');
+  }
+
+  /** Small DOM helpers so the functions above stay readable. */
+  function setText(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = value == null ? '' : String(value);
+  }
+  function setHtml(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = value;
+  }
+
+  function wireClientDetail() {
+    var overlay = document.getElementById('client-detail-overlay');
+    if (!overlay) { console.warn('Client detail card missing from the page — skipping wireClientDetail.'); return; }
+
+    on('btn-close-client-detail', 'click', function () { overlay.classList.remove('open'); });
+
+    on('btn-detail-edit', 'click', function () {
+      var id = detailClientId;
+      overlay.classList.remove('open');
+      if (id) openClientModal(id);
+    });
+
+    on('btn-detail-followup', 'click', function () {
+      var id = detailClientId;
+      overlay.classList.remove('open');
+      if (id) openFollowupModal(id);
+    });
+
+    // Clicking the dimmed area outside the card closes it — the card is
+    // read-only, so nothing can be lost by closing it accidentally.
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.classList.remove('open');
+    });
+  }
+
+  function wireFollowupModal() {
+    var overlay = document.getElementById('followup-modal-overlay');
+    var form = document.getElementById('followup-form');
+    if (!overlay || !form) { console.warn('Follow-up modal elements missing on the page — skipping wireFollowupModal.'); return; }
+
+    on('btn-add-followup', 'click', function () { openFollowupModal(null); });
+    on('btn-add-followup-dash', 'click', function () { openFollowupModal(null); });
+    on('btn-cancel-followup', 'click', function () { overlay.classList.remove('open'); });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      // Same double-click guard as the Client form.
+      if (form.dataset.submitting === 'true') return;
+      form.dataset.submitting = 'true';
+      var submitBtn = form.querySelector('button[type="submit"]');
+      var originalLabel = submitBtn ? submitBtn.textContent : '';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving...'; }
+
+      var payload = {
+        Client_ID: document.getElementById('followup-client').value,
+        Followup_Date: document.getElementById('followup-date').value,
+        Followup_Time: document.getElementById('followup-time').value,
+        Type: document.getElementById('followup-type').value,
+        Priority: document.getElementById('followup-priority').value,
+        Assigned_To: (state.user && state.user.name) || '',
+        Notes: document.getElementById('followup-notes').value
+      };
+      run('createFollowup', payload).then(function (res) {
+        if (res.success) overlay.classList.remove('open');
+        handleResult(res);
+      }).catch(function (err) {
+        handleApiError(err);
+      }).then(function () {
+        form.dataset.submitting = 'false';
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
+      });
+    });
+  }
+
+  // ---------- Bulk Lead Import (CSV) ----------
+  var currentRawCSVRows = [];
+  var currentParsedLeads = [];
+  var currentCSVHeaders = [];
+
+  function wireImportModal() {
+    var overlay = document.getElementById('import-modal-overlay');
+    var form = document.getElementById('import-form');
+    var fileInput = document.getElementById('import-csv-file');
+    var chooseBtn = document.getElementById('btn-choose-file');
+    var fileNameEl = document.getElementById('import-file-name');
+    var mappingWrap = document.getElementById('import-mapping-wrap');
+    var previewWrap = document.getElementById('import-preview-wrap');
+    var leadCountEl = document.getElementById('import-lead-count');
+    var previewTbody = document.getElementById('import-preview-tbody');
+    var submitBtn = document.getElementById('btn-submit-import');
+
+    if (!overlay || !form) return;
+
+    function openModal() {
+      currentRawCSVRows = [];
+      currentParsedLeads = [];
+      currentCSVHeaders = [];
+      if (fileInput) fileInput.value = '';
+      if (fileNameEl) fileNameEl.textContent = 'No file selected';
+      currentWorkbook = null;
+      if (sheetWrap) sheetWrap.style.display = 'none';
+      if (mappingWrap) mappingWrap.style.display = 'none';
+      if (previewWrap) previewWrap.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Import Leads';
+      }
+      overlay.classList.add('open');
+    }
+
+    on('btn-import-clients', 'click', openModal);
+    on('btn-import-clients-dash', 'click', openModal);
+    on('btn-import-clients-panel', 'click', openModal);
+    on('btn-cancel-import', 'click', function () { overlay.classList.remove('open'); });
+    on('btn-download-template', 'click', downloadSampleCSV);
+
+    if (chooseBtn && fileInput) {
+      chooseBtn.addEventListener('click', function () { fileInput.click(); });
+    }
+
+    // Auto-update preview when column mapping is changed
+    ['map-col-name', 'map-col-phone', 'map-col-company', 'map-col-city', 'map-col-email', 'map-col-notes', 'map-col-date'].forEach(function (id) {
+      var select = document.getElementById(id);
+      if (select) {
+        select.addEventListener('change', function () {
+          if (currentRawCSVRows.length > 1) {
+            applyManualMappingAndPreview();
+          }
+        });
+      }
+    });
+
+    // Holds the opened Excel workbook, so switching sheets doesn't re-read the file.
+    var currentWorkbook = null;
+    var sheetWrap = document.getElementById('import-sheet-wrap');
+    var sheetSelect = document.getElementById('import-sheet-select');
+
+    /**
+     * Everything downstream of "we now have rows" — identical for Excel and CSV.
+     * rows is an array of arrays; the first one is the heading row.
+     */
+    function useRows(rows) {
+      currentRawCSVRows = rows;
+
+      if (!currentRawCSVRows || currentRawCSVRows.length < 2) {
+        showToast('That sheet is empty, or has no data rows below the headings.', 'error');
+        if (mappingWrap) mappingWrap.style.display = 'none';
+        if (previewWrap) previewWrap.style.display = 'none';
+        if (submitBtn) submitBtn.disabled = true;
+        return;
+      }
+
+      currentCSVHeaders = currentRawCSVRows[0];
+      populateMappingDropdowns(currentCSVHeaders);
+      applyManualMappingAndPreview();
+      if (mappingWrap) mappingWrap.style.display = 'block';
+    }
+
+    /** Turns one sheet of the open workbook into rows, then hands it to useRows(). */
+    function loadSheetByName(sheetName) {
+      if (!currentWorkbook) return;
+      var ws = currentWorkbook.Sheets[sheetName];
+      if (!ws) {
+        showToast('Could not open the sheet "' + sheetName + '".', 'error');
+        return;
+      }
+      // raw:false renders dates and numbers as readable text; defval:'' keeps every
+      // row the same length so the column mapping stays lined up past blank cells.
+      var rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false });
+      useRows(rows);
+    }
+
+    if (sheetSelect) {
+      sheetSelect.addEventListener('change', function () {
+        loadSheetByName(sheetSelect.value);
+      });
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener('change', function (e) {
+        var file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        if (fileNameEl) fileNameEl.textContent = '📄 ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+
+        currentWorkbook = null;
+        if (sheetWrap) sheetWrap.style.display = 'none';
+
+        var name = String(file.name || '').toLowerCase();
+        var isExcel = /\.(xlsx|xlsm|xlsb|xls)$/.test(name);
+        var reader = new FileReader();
+
+        if (isExcel) {
+          if (typeof XLSX === 'undefined') {
+            showToast('Excel support did not load. Check your internet connection, or save the file as CSV instead.', 'error');
+            return;
+          }
+          reader.onload = function (evt) {
+            try {
+              currentWorkbook = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' });
+              var sheetNames = currentWorkbook.SheetNames || [];
+
+              if (sheetNames.length === 0) {
+                showToast('That Excel file has no sheets in it.', 'error');
+                return;
+              }
+
+              // Offer the sheet picker only when there's actually a choice to make.
+              if (sheetNames.length > 1 && sheetSelect && sheetWrap) {
+                sheetSelect.innerHTML = sheetNames.map(function (n) {
+                  return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>';
+                }).join('');
+                sheetSelect.value = sheetNames[0];
+                sheetWrap.style.display = 'block';
+              }
+
+              loadSheetByName(sheetNames[0]);
+            } catch (err) {
+              showToast('Could not read that Excel file: ' + (err.message || err), 'error');
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        } else {
+          reader.onload = function (evt) {
+            try {
+              useRows(parseCSV(evt.target.result));
+            } catch (err) {
+              showToast('Could not read that CSV file: ' + (err.message || err), 'error');
+            }
+          };
+          reader.readAsText(file);
+        }
+      });
+    }
+
+    function populateMappingDropdowns(headers) {
+      var optionsHtml = '<option value="-1">-- None / Skip --</option>' +
+        headers.map(function (h, idx) {
+          return '<option value="' + idx + '">' + escapeHtml(h || ('Column ' + (idx + 1))) + '</option>';
+        }).join('');
+
+      var initialDetected = detectColumnIndices(headers);
+
+      setMappingSelect('map-col-name', optionsHtml, initialDetected.nameIdx);
+      setMappingSelect('map-col-phone', optionsHtml, initialDetected.phoneIdx);
+      setMappingSelect('map-col-company', optionsHtml, initialDetected.compIdx);
+      setMappingSelect('map-col-city', optionsHtml, initialDetected.cityIdx);
+      setMappingSelect('map-col-email', optionsHtml, initialDetected.emailIdx);
+      setMappingSelect('map-col-notes', optionsHtml, initialDetected.notesIdx);
+      setMappingSelect('map-col-date', optionsHtml, initialDetected.dateIdx);
+    }
+
+    function setMappingSelect(id, optionsHtml, selectedIndex) {
+      var select = document.getElementById(id);
+      if (!select) return;
+      select.innerHTML = optionsHtml;
+      select.value = selectedIndex !== undefined && selectedIndex !== null ? String(selectedIndex) : '-1';
+    }
+
+    function applyManualMappingAndPreview() {
+      var nameIdx = parseInt(document.getElementById('map-col-name').value, 10);
+      var phoneIdx = parseInt(document.getElementById('map-col-phone').value, 10);
+      var compIdx = parseInt(document.getElementById('map-col-company').value, 10);
+      var cityIdx = parseInt(document.getElementById('map-col-city').value, 10);
+      var emailIdx = parseInt(document.getElementById('map-col-email').value, 10);
+      var notesIdx = parseInt(document.getElementById('map-col-notes').value, 10);
+      var dateEl = document.getElementById('map-col-date');
+      var dateIdx = dateEl ? parseInt(dateEl.value, 10) : -1;
+
+      var mapping = {
+        nameIdx: nameIdx,
+        phoneIdx: phoneIdx,
+        compIdx: compIdx,
+        cityIdx: cityIdx,
+        emailIdx: emailIdx,
+        notesIdx: notesIdx,
+        dateIdx: dateIdx
+      };
+
+      currentParsedLeads = mapCSVRowsWithMapping(currentRawCSVRows, mapping);
+
+      if (currentParsedLeads.length === 0) {
+        if (leadCountEl) leadCountEl.textContent = '⚠️ No valid leads found (make sure Phone Column is selected)';
+        if (submitBtn) submitBtn.disabled = true;
+        if (previewWrap) previewWrap.style.display = 'none';
+        return;
+      }
+
+      if (leadCountEl) leadCountEl.textContent = '✅ ' + currentParsedLeads.length + ' lead(s) ready to import';
+
+      if (previewTbody) {
+        var previewRows = currentParsedLeads.slice(0, 5);
+        previewTbody.innerHTML = previewRows.map(function (lead) {
+          return '<tr>' +
+            '<td style="padding:5px 8px;">' + escapeHtml(lead.Client_Name || '—') + '</td>' +
+            '<td style="padding:5px 8px;">' + escapeHtml(lead.Phone || '—') + '</td>' +
+            '<td style="padding:5px 8px;">' + escapeHtml(lead.Company || '—') + '</td>' +
+            '<td style="padding:5px 8px;">' + escapeHtml(lead.City || '—') + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+
+      if (previewWrap) previewWrap.style.display = 'block';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Import ' + currentParsedLeads.length + ' Leads';
+      }
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!currentParsedLeads || currentParsedLeads.length === 0) {
+        showToast('Please select a valid CSV file with phone numbers first.', 'error');
+        return;
+      }
+
+      if (form.dataset.submitting === 'true') return;
+      form.dataset.submitting = 'true';
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Importing ' + currentParsedLeads.length + ' leads...';
+      }
+
+      var skipDuplicates = document.getElementById('import-skip-duplicates') ? document.getElementById('import-skip-duplicates').checked : true;
+      var defaultSource = document.getElementById('import-default-source') ? document.getElementById('import-default-source').value : 'Imported';
+      var defaultStatus = document.getElementById('import-default-status') ? document.getElementById('import-default-status').value : 'New';
+
+      // The file name (and Excel sheet name) go along too, so the Imports
+      // screen can show which file each batch of leads came from.
+      var chosenFile = fileInput && fileInput.files && fileInput.files[0];
+
+      var options = {
+        skipDuplicates: skipDuplicates,
+        defaultSource: defaultSource,
+        defaultStatus: defaultStatus,
+        fileName: chosenFile ? chosenFile.name : '',
+        sheetName: (sheetWrap && sheetWrap.style.display !== 'none' && sheetSelect) ? sheetSelect.value : ''
+      };
+
+      run('importClientsBulk', currentParsedLeads, options).then(function (res) {
+        if (res.success) overlay.classList.remove('open');
+        handleResult(res);
+      }).catch(function (err) {
+        handleApiError(err);
+      }).then(function () {
+        form.dataset.submitting = 'false';
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Import Leads';
+        }
+      });
+    });
+  }
+
+  /** Robust CSV parser supporting quotes, escaped quotes, and newlines */
+  function parseCSV(text) {
+    var lines = [];
+    var row = [];
+    var inQuotes = false;
+    var current = '';
+
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      var next = text[i + 1];
+
+      if (c === '"') {
+        if (inQuotes && next === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (c === ',' && !inQuotes) {
+        row.push(current.trim());
+        current = '';
+      } else if ((c === '\r' || c === '\n') && !inQuotes) {
+        if (c === '\r' && next === '\n') i++;
+        row.push(current.trim());
+        if (row.some(function (cell) { return cell !== ''; })) {
+          lines.push(row);
+        }
+        row = [];
+        current = '';
+      } else {
+        current += c;
+      }
+    }
+    if (current !== '' || row.length > 0) {
+      row.push(current.trim());
+      if (row.some(function (cell) { return cell !== ''; })) {
+        lines.push(row);
+      }
+    }
+    return lines;
+  }
+
+  /** Smart multi-platform column detector (Facebook, IndiaMART, Justdial, TradeIndia, Google Ads) */
+  function detectColumnIndices(rawHeaders) {
+    var headers = rawHeaders.map(function (h) {
+      return String(h || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    });
+
+    function findCol(aliases) {
+      for (var i = 0; i < aliases.length; i++) {
+        var idx = headers.indexOf(aliases[i]);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    }
+
+    var nameIdx = findCol([
+      'name', 'clientname', 'fullname', 'contactname', 'customername', 'leadname', 'person', 'buyername',
+      'sendername', 'contactperson', 'firstname', 'userfullname'
+    ]);
+
+    var phoneIdx = findCol([
+      'phone', 'mobile', 'contact', 'phonenumber', 'mobilenumber', 'contactnumber', 'tel', 'phoneno', 'mobileno',
+      'sendermobile', 'senderphone', 'userphone', 'whatsapp', 'callermobile', 'contactno'
+    ]);
+
+    var compIdx = findCol([
+      'company', 'business', 'firm', 'organization', 'companyname', 'sendercompany', 'businessname', 'firmname', 'org'
+    ]);
+
+    var emailIdx = findCol([
+      'email', 'emailaddress', 'mail', 'senderemail', 'useremail', 'emailid'
+    ]);
+
+    var cityIdx = findCol([
+      'city', 'location', 'town', 'district', 'sendercity', 'area'
+    ]);
+
+    var dateIdx = findCol([
+      'createdtime', 'created', 'createdon', 'createdat', 'datecreated', 'date', 'leaddate',
+      'submittedon', 'submitted', 'timestamp', 'time', 'enquirydate', 'querydate', 'inquirydate',
+      'receivedon', 'entrydate', 'dateandtime', 'datetime'
+    ]);
+
+    var notesIdx = findCol([
+      'notes', 'note', 'remarks', 'comment', 'comments', 'requirement', 'query', 'message',
+      'queryproductname', 'querymessage', 'inquirydetails', 'adname', 'campaignname'
+    ]);
+
+    return {
+      nameIdx: nameIdx,
+      phoneIdx: phoneIdx,
+      compIdx: compIdx,
+      emailIdx: emailIdx,
+      cityIdx: cityIdx,
+      notesIdx: notesIdx,
+      dateIdx: dateIdx
+    };
+  }
+
+  /** Maps raw CSV rows to clean CRM objects based on chosen or detected column indices */
+  function mapCSVRowsWithMapping(csvRows, mapping) {
+    if (!csvRows || csvRows.length < 2) return [];
+    var leads = [];
+
+    for (var r = 1; r < csvRows.length; r++) {
+      var row = csvRows[r];
+      var name = mapping.nameIdx !== -1 && row[mapping.nameIdx] ? String(row[mapping.nameIdx]).trim() : '';
+      var phone = mapping.phoneIdx !== -1 && row[mapping.phoneIdx] ? String(row[mapping.phoneIdx]).trim() : '';
+      var comp = mapping.compIdx !== -1 && row[mapping.compIdx] ? String(row[mapping.compIdx]).trim() : '';
+      var email = mapping.emailIdx !== -1 && row[mapping.emailIdx] ? String(row[mapping.emailIdx]).trim() : '';
+      var city = mapping.cityIdx !== -1 && row[mapping.cityIdx] ? String(row[mapping.cityIdx]).trim() : '';
+      var notes = mapping.notesIdx !== -1 && row[mapping.notesIdx] ? String(row[mapping.notesIdx]).trim() : '';
+      var leadDate = mapping.dateIdx !== -1 && row[mapping.dateIdx] ? String(row[mapping.dateIdx]).trim() : '';
+
+      // Auto-name if phone exists but name was blank
+      if (!name && phone) name = 'Lead ' + r;
+
+      if (name && phone) {
+        leads.push({
+          Client_Name: name,
+          Phone: phone,
+          Company: comp,
+          Email: email,
+          City: city,
+          Notes: notes,
+          Lead_Date: leadDate
+        });
+      }
+    }
+    return leads;
+  }
+
+  /** Downloads a pre-formatted sample CSV template for the user */
+  function downloadSampleCSV() {
+    var csvContent = 'Name,Phone,Company,Email,City,State,Source,Industry,Notes\r\n' +
+      'Rahul Sharma,9876543210,Alpha Traders,rahul@example.com,Mumbai,Maharashtra,Facebook Ads,Retailer,Interested in bulk purchase\r\n' +
+      'Pooja Verma,9123456780,Fitness World,pooja@fitness.in,Delhi,Delhi,IndiaMART,Gym / Fitness Studio,Requested catalog\r\n' +
+      'Amit Patel,9898012345,NutriStore,amit@nutristore.com,Ahmedabad,Gujarat,Website Inquiry,Distributor,Call back tomorrow at 4pm';
+
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var link = document.createElement('a');
+    var url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'crm_leads_sample.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // ---------- Shared write-result handler ----------
+  function handleResult(res) {
+    if (res.success) {
+      showToast(res.message);
+      refreshAll();
+    } else {
+      showToast(res.message, 'error');
+    }
+  }
+
+  function handleApiError(err, prefix) {
+    var msg = (err && err.message) || String(err);
+    var text = prefix ? prefix + ': ' + msg : msg;
+    if (msg.indexOf('session has expired') > -1 || msg.indexOf('sign in again') > -1) {
+      showToast('Your session has expired. Please sign in again.', 'error');
+      setTimeout(function () {
+        showLoginScreen();
+      }, 1200);
+      return;
+    }
+    showToast(text, 'error');
+  }
+</script>
