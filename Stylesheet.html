@@ -1,0 +1,321 @@
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f6f7f4;
+    color: #1a2420;
+  }
+  .app { display: none; height: 100vh; }
+  .app.ready { display: flex; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: #ffffff;
+    border-right: 1px solid #dde3de;
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #193f34;
+    padding: 0 20px 20px;
+    border-bottom: 1px solid #e9ede9;
+    margin-bottom: 12px;
+  }
+  .nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .nav-link {
+    display: block;
+    padding: 10px 20px;
+    color: #51605a;
+    text-decoration: none;
+    font-size: 0.92rem;
+    border-left: 3px solid transparent;
+  }
+  .nav-link:hover { background: #e3efe9; color: #193f34; }
+  .nav-link.active { background: #e3efe9; color: #193f34; font-weight: 600; border-left-color: #2f6f5e; }
+
+  /* Main area */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    padding: 16px 32px;
+    border-bottom: 1px solid #dde3de;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .topbar h1 { margin: 0; font-size: 1.3rem; color: #1a2420; }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .current-user { font-size: 0.85rem; color: #51605a; }
+
+  .content { padding: 32px; overflow-y: auto; flex: 1; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel h2 { margin-top: 0; color: #193f34; }
+  .empty-state { color: #8b9791; font-size: 0.9rem; padding: 20px 0; }
+
+  .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .panel-header h2 { margin: 0; }
+  .quick-actions { display: flex; gap: 10px; }
+
+  /* Buttons */
+  .btn-primary, .btn-secondary {
+    font-size: 0.88rem;
+    font-weight: 600;
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .btn-primary { background: #2f6f5e; color: #ffffff; }
+  .btn-primary:hover { background: #255a4c; }
+  .btn-secondary { background: #ffffff; color: #51605a; border-color: #dde3de; }
+  .btn-secondary:hover { background: #f0f2ef; }
+  .btn-link {
+    background: none; border: none; cursor: pointer;
+    font-size: 0.8rem; font-weight: 600; padding: 2px 5px; border-radius: 4px;
+    white-space: nowrap;
+  }
+  .btn-link.edit { color: #2f6f5e; }
+  .btn-link.delete { color: #a13f3f; }
+  .btn-link.complete { color: #2f6f5e; }
+  /* Booking a call is the most common thing you do from a client row, so it
+     leads the actions and carries the darker brand colour. */
+  .btn-link.followup { color: #193f34; font-weight: 700; }
+  .btn-link:hover { background: #e9ede9; }
+
+  /* Toolbar */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+  .toolbar input, .toolbar select {
+    padding: 8px 12px;
+    border: 1px solid #dde3de;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    background: #ffffff;
+  }
+  .toolbar input { flex: 1; max-width: 320px; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; background: #ffffff; border: 1px solid #dde3de; border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.85rem; }
+  thead th {
+    text-align: left; background: #e3efe9; color: #193f34;
+    font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 8px 12px; white-space: nowrap;
+  }
+  tbody td {
+    padding: 6px 12px; border-top: 1px solid #e9ede9;
+    vertical-align: middle; line-height: 1.35;
+  }
+  tbody tr:hover td { background: #f6f7f4; }
+
+  /* Keep Edit and Delete on one line. When they wrapped onto two lines, every
+     row in the table was forced to roughly double in height. */
+  td.row-actions { white-space: nowrap; text-align: right; }
+
+  /* A very long company name shouldn't stretch its row over several lines —
+     it's trimmed with "..." and shown in full on hover. */
+  td.cell-clip {
+    max-width: 260px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ---- Clients & Follow-ups column layout ----
+     These two tables use a FIXED column layout with the widths set below.
+     Auto layout was the bug: the browser handed the Notes column a fat slice
+     and squeezed Name and Added down to nothing, so both wrapped and every
+     row grew two or three lines tall. Fixed layout means each column is
+     exactly the width stated here, no row ever wraps, anything too long
+     trims with "...", and Notes absorbs whatever space is left over.
+
+     Header cells ARE allowed to wrap ("Next Follow-up" goes onto two lines
+     on a narrow screen). That costs a few pixels of height once, at the top
+     of the table, instead of forcing the whole column 30px wider on every
+     screen — and it never affects the height of the data rows. */
+  #clients-table, #followups-table { table-layout: fixed; width: 100%; }
+  #clients-table { min-width: 985px; }
+  #followups-table { min-width: 880px; }
+
+  #clients-table thead th, #followups-table thead th {
+    white-space: normal; line-height: 1.25; padding: 7px 10px; vertical-align: bottom;
+  }
+  #clients-table tbody td, #followups-table tbody td {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 6px 10px;
+  }
+  .client-name-link {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%; display: inline-block; vertical-align: bottom;
+  }
+
+  /* Clients: Name, Company, Phone, Status, Priority, Added, Next, Notes, actions.
+     The Notes column (8th) is deliberately given no width — it takes the rest. */
+  #clients-table th:nth-child(1) { width: 126px; }
+  #clients-table th:nth-child(2) { width: 100px; }
+  #clients-table th:nth-child(3) { width: 96px; }
+  #clients-table th:nth-child(4) { width: 93px; }
+  #clients-table th:nth-child(5) { width: 80px; }
+  #clients-table th:nth-child(6) { width: 101px; }
+  #clients-table th:nth-child(7) { width: 101px; }
+  #clients-table th:nth-child(9) { width: 174px; }
+
+  /* Follow-ups: Client, Date, Time, Type, Priority, Status, Notes, actions. */
+  #followups-table th:nth-child(1) { width: 140px; }
+  #followups-table th:nth-child(2) { width: 101px; }
+  #followups-table th:nth-child(3) { width: 68px; }
+  #followups-table th:nth-child(4) { width: 76px; }
+  #followups-table th:nth-child(5) { width: 80px; }
+  #followups-table th:nth-child(6) { width: 93px; }
+  #followups-table th:nth-child(8) { width: 142px; }
+
+  /* The Notes column. Greyer than the rest, because it's supporting detail —
+     hover for the full text, or click the name to open the client card. */
+  td.cell-note { color: #51605a; font-size: 0.82rem; }
+  td.cell-note .note-empty { color: #c3cec8; }
+  /* Marks a note that came from a finished call, as opposed to one typed
+     when the follow-up was first scheduled. */
+  td.cell-note .note-outcome::before { content: '\260E  '; color: #2f6f5e; }
+
+  /* Client names are clickable — they open the detail card. */
+  .client-name-link {
+    background: none; border: none; padding: 0; font: inherit;
+    color: #193f34; font-weight: 600; cursor: pointer;
+    text-align: left; text-decoration: underline;
+    text-decoration-color: #c3cec8; text-underline-offset: 3px;
+  }
+  .client-name-link:hover { color: #2f6f5e; text-decoration-color: #2f6f5e; }
+
+  /* ---- Client detail card ---- */
+  .detail-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #e9ede9; margin-bottom: 14px;
+  }
+  .detail-subline { font-size: 0.85rem; color: #51605a; margin-top: 3px; }
+  .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  .detail-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px 18px; margin-bottom: 18px;
+  }
+  .detail-field-label {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #8b9791; font-weight: 600;
+  }
+  .detail-field-value { font-size: 0.88rem; color: #1a2420; word-break: break-word; }
+
+  .detail-section { margin-bottom: 18px; }
+  .detail-section-title {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #193f34; font-weight: 700; margin-bottom: 8px;
+  }
+  .detail-count { color: #8b9791; font-weight: 500; text-transform: none; letter-spacing: 0; }
+
+  .detail-note-box {
+    background: #f6f8f6; border: 1px solid #e9ede9; border-radius: 8px;
+    padding: 10px 12px; font-size: 0.88rem; color: #1a2420;
+    white-space: pre-wrap; line-height: 1.5;
+  }
+  .detail-note-box.empty { color: #8b9791; font-style: italic; }
+
+  .detail-history { max-height: 300px; overflow-y: auto; }
+  .detail-history-item {
+    border-left: 3px solid #dde3de; padding: 0 0 14px 14px;
+    position: relative; margin-left: 4px;
+  }
+  .detail-history-item:last-child { padding-bottom: 0; }
+  .detail-history-item.done { border-left-color: #2f6f5e; }
+  .detail-history-item.overdue { border-left-color: #a13f3f; }
+  .detail-history-head {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 0.85rem; color: #1a2420; font-weight: 600;
+  }
+  .detail-history-meta { font-size: 0.76rem; color: #8b9791; font-weight: 400; }
+  .detail-history-note {
+    font-size: 0.85rem; color: #1a2420; margin-top: 5px;
+    white-space: pre-wrap; line-height: 1.5;
+  }
+  .detail-history-note .note-tag {
+    display: inline-block; font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.04em; font-weight: 700; color: #2f6f5e; margin-right: 6px;
+  }
+  .detail-history-note.plan .note-tag { color: #8b9791; }
+
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 20px;
+    font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+  }
+  .badge-new, .badge-pending { background: #e3efe9; color: #193f34; }
+  .badge-contacted { background: #eef1ed; color: #51605a; }
+  .badge-active, .badge-completed { background: #dff3e6; color: #1c6b3f; }
+  .badge-inactive, .badge-cancelled { background: #eef1ed; color: #8b9791; }
+  .badge-lost { background: #f4e2e0; color: #a13f3f; }
+  .badge-overdue { background: #f4e2e0; color: #a13f3f; }
+  .badge-high { background: #f3e6d3; color: #a6631f; }
+  .badge-medium { background: #eef1ed; color: #51605a; }
+  .badge-low { background: #f6f7f4; color: #8b9791; }
+
+  /* Dashboard stat cards */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+  .stat-card { background: #ffffff; border: 1px solid #dde3de; border-radius: 12px; padding: 18px 20px; }
+  .stat-card .stat-value { font-size: 1.7rem; font-weight: 700; color: #193f34; }
+  .stat-card .stat-label { font-size: 0.82rem; color: #51605a; margin-top: 4px; }
+  .stat-card.warn .stat-value { color: #a6631f; }
+  .stat-card.risk .stat-value { color: #a13f3f; }
+
+  /* Modals */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(20,30,25,0.35);
+    align-items: center; justify-content: center; padding: 20px; z-index: 50;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #ffffff; border-radius: 12px; padding: 26px 28px;
+    width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 20px 60px -20px rgba(20,30,25,0.4);
+  }
+  .modal h3 { margin: 0 0 16px; color: #193f34; }
+  .modal form { display: flex; flex-direction: column; gap: 12px; }
+  .modal label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: #51605a; font-weight: 600; }
+  .modal input, .modal select, .modal textarea {
+    font-family: inherit; font-size: 0.9rem; font-weight: 400; color: #1a2420;
+    padding: 8px 10px; border: 1px solid #dde3de; border-radius: 7px;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field-hint { font-size: 0.72rem; font-weight: 400; color: #8b9791; margin-top: 2px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #193f34; color: #ffffff; padding: 12px 20px; border-radius: 8px;
+    font-size: 0.88rem; opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+    max-width: 90vw; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { background: #a13f3f; }
+
+  /* Login screen */
+  .login-overlay {
+    position: fixed; inset: 0; background: #f6f7f4;
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .login-overlay.hidden { display: none; }
+  .login-card {
+    background: #ffffff; border: 1px solid #dde3de; border-radius: 14px;
+    padding: 36px 40px; width: 100%; max-width: 360px; text-align: center;
+    box-shadow: 0 20px 60px -20px rgba(20,30,25,0.25);
+  }
+  .login-card h1 { color: #193f34; margin: 0 0 6px; font-size: 1.4rem; }
+  .login-card p { color: #51605a; margin: 0 0 18px; font-size: 0.9rem; }
+  .login-card select, .login-card input {
+    width: 100%; padding: 10px 12px; border: 1px solid #dde3de; border-radius: 8px;
+    font-size: 0.9rem; margin-bottom: 14px; background: #ffffff; font-family: inherit;
+  }
+  .login-card .btn-primary { width: 100%; padding: 11px; }
+  .login-error { color: #a13f3f; font-size: 0.82rem; margin: 12px 0 0; min-height: 1em; }
+</style>
