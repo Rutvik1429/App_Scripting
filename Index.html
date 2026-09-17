@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <?!= include('Stylesheet'); ?>
+    <!-- SheetJS — lets the import screen read Excel files (.xlsx / .xls) in the
+         browser, the same way it already reads CSV. Loaded from a CDN, so this
+         needs an internet connection (which the app needs anyway). -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <?!= include('Sidebar'); ?>
+      <div class="main">
+        <header class="topbar">
+          <h1 id="page-title">Dashboard</h1>
+          <span class="topbar-right">
+            <span id="current-user" class="current-user"></span>
+            <button id="btn-switch-user" class="btn-link">Switch</button>
+          </span>
+        </header>
+        <div class="content">
+
+          <section id="panel-dashboard" class="panel active">
+            <div class="panel-header">
+              <h2>Dashboard</h2>
+              <div class="quick-actions">
+                <button class="btn-secondary" id="btn-import-clients-dash">📥 Import Leads</button>
+                <button class="btn-primary" id="btn-add-client-dash">+ Add Client</button>
+                <button class="btn-secondary" id="btn-add-followup-dash">+ Schedule Follow-up</button>
+              </div>
+            </div>
+            <div class="stat-grid" id="stat-grid"></div>
+          </section>
+
+          <section id="panel-clients" class="panel">
+            <div class="panel-header">
+              <h2>Clients</h2>
+              <div class="quick-actions">
+                <button class="btn-secondary" id="btn-import-clients">📥 Import Leads</button>
+                <button class="btn-primary" id="btn-add-client">+ Add Client</button>
+              </div>
+            </div>
+            <div class="toolbar">
+              <input type="text" id="client-search" placeholder="Search by name, company, or phone...">
+              <select id="client-status-filter">
+                <option value="">All statuses</option>
+                <option>New</option>
+                <option>Contacted</option>
+                <option>Active</option>
+                <option>Inactive</option>
+                <option>Lost</option>
+              </select>
+              <select id="client-date-preset" title="Filter by when the client came in">
+                <option value="">Any date</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="thismonth">This month</option>
+                <option value="lastmonth">Last month</option>
+                <option value="custom">Custom range...</option>
+              </select>
+              <span id="client-date-range" style="display:none; align-items:center; gap:6px;">
+                <input type="date" id="client-date-from" title="From date">
+                <span style="color:#8b9791; font-size:0.8rem;">to</span>
+                <input type="date" id="client-date-to" title="To date">
+              </span>
+            </div>
+            <div class="table-wrap">
+              <table id="clients-table">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Company</th><th>Phone</th><th>Status</th>
+                    <th>Priority</th><th>Added</th><th>Next Follow-up</th><th>Notes</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="clients-tbody"></tbody>
+              </table>
+              <p class="empty-state" id="clients-empty" style="display:none;">No clients yet — click "+ Add Client" to create the first one.</p>
+            </div>
+          </section>
+
+          <section id="panel-followups" class="panel">
+            <div class="panel-header">
+              <h2>Follow-ups</h2>
+              <button class="btn-primary" id="btn-add-followup">+ Schedule Follow-up</button>
+            </div>
+            <div class="toolbar">
+              <select id="followup-filter">
+                <option value="today">Today</option>
+                <option value="overdue">Overdue</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table id="followups-table">
+                <thead>
+                  <tr>
+                    <th>Client</th><th>Date</th><th>Time</th><th>Type</th>
+                    <th>Priority</th><th>Status</th><th>Notes / Call Outcome</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="followups-tbody"></tbody>
+              </table>
+              <p class="empty-state" id="followups-empty" style="display:none;">Nothing here — click "+ Schedule Follow-up" to add one.</p>
+            </div>
+          </section>
+
+          <section id="panel-imports" class="panel">
+            <div class="panel-header">
+              <h2>Imports</h2>
+              <button class="btn-primary" id="btn-import-clients-panel">📥 Import Leads</button>
+            </div>
+            <p style="font-size:0.85rem; color:#51605a; margin:0 0 14px; max-width:70ch;">
+              Every file you've imported, how many leads went in, and how many were skipped.
+              Click <strong>Details</strong> to see exactly which rows were skipped and why, or
+              <strong>Undo</strong> to remove everything that came from one file.
+            </p>
+            <div class="table-wrap">
+              <table id="imports-table">
+                <thead>
+                  <tr>
+                    <th>File</th><th>Imported On</th><th>By</th>
+                    <th>Imported</th><th>Skipped</th><th>Status</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="imports-tbody"></tbody>
+              </table>
+              <p class="empty-state" id="imports-empty" style="display:none;">No imports yet — click "📥 Import Leads" to bring in your first file.</p>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / Edit Client -->
+    <div class="modal-overlay" id="client-modal-overlay">
+      <div class="modal">
+        <h3 id="client-modal-title">Add Client</h3>
+        <form id="client-form">
+          <input type="hidden" id="client-id">
+          <label>Name *<input type="text" id="client-name" required></label>
+          <label>Company<input type="text" id="client-company"></label>
+          <div class="form-row">
+            <label>Phone *
+              <input type="tel" id="client-phone" required inputmode="numeric"
+                     maxlength="15" placeholder="10 digits">
+              <span class="field-hint">Must be 10 digits</span>
+            </label>
+            <label>Email
+              <input type="email" id="client-email" placeholder="name@company.com">
+            </label>
+          </div>
+          <label>Address<input type="text" id="client-address"></label>
+          <div class="form-row">
+            <label>City
+              <input type="text" id="client-city" list="city-suggestions" autocomplete="off"
+                     placeholder="Start typing...">
+            </label>
+            <label>State
+              <select id="client-state">
+                <option value="">Select state...</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row">
+            <label>Source
+              <select id="client-source">
+                <option>Referral</option><option>Website Inquiry</option><option>Phone Inquiry</option>
+                <option>Walk-in</option><option>Social Media</option><option>Trade Show</option><option>Other</option>
+              </select>
+            </label>
+            <label>Industry
+              <select id="client-industry">
+                <option>Retailer</option><option>Distributor</option><option>Gym / Fitness Studio</option>
+                <option>E-commerce</option><option>Individual Customer</option><option>Other</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-row">
+            <label>Status
+              <select id="client-status">
+                <option>New</option><option>Contacted</option><option>Active</option><option>Inactive</option><option>Lost</option>
+              </select>
+            </label>
+            <label>Priority
+              <select id="client-priority">
+                <option>Low</option><option selected>Medium</option><option>High</option>
+              </select>
+            </label>
+          </div>
+          <label>Notes<textarea id="client-notes" rows="3"></textarea></label>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="btn-cancel-client">Cancel</button>
+            <button type="submit" class="btn-primary">Save Client</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Schedule Follow-up -->
+    <div class="modal-overlay" id="followup-modal-overlay">
+      <div class="modal">
+        <h3 id="followup-modal-title">Schedule Follow-up</h3>
+        <form id="followup-form">
+          <label>Client *<select id="followup-client" required></select></label>
+          <div class="form-row">
+            <label>Date *<input type="date" id="followup-date" required></label>
+            <label>Time<input type="time" id="followup-time"></label>
+          </div>
+          <div class="form-row">
+            <label>Type
+              <select id="followup-type"><option>Call</option><option>Email</option><option>Meeting</option><option>Visit</option></select>
+            </label>
+            <label>Priority
+              <select id="followup-priority"><option>Low</option><option selected>Medium</option><option>High</option></select>
+            </label>
+          </div>
+          <label>Notes<textarea id="followup-notes" rows="3"></textarea></label>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" id="btn-cancel-followup">Cancel</button>
+            <button type="submit" class="btn-primary">Save Follow-up</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Bulk Lead Import Modal -->
+    <div class="modal-overlay" id="import-modal-overlay">
+      <div class="modal" style="max-width: 560px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0;">📥 Import Leads</h3>
+          <button type="button" class="btn-link" id="btn-download-template" style="font-size:0.8rem; color:#2f6f5e;">⬇ Sample CSV Template</button>
+        </div>
+        <p style="font-size:0.85rem; color:#51605a; margin:0 0 16px;">
+          Upload an <strong>Excel</strong> file (.xlsx / .xls) or a <strong>CSV</strong> file — exported from Facebook Lead Ads, IndiaMART, Justdial, or your own records.
+        </p>
+
+        <form id="import-form">
+          <div style="border: 2px dashed #c3cec8; border-radius: 10px; padding: 20px; text-align: center; background: #fbfcfb; margin-bottom: 14px;">
+            <input type="file" id="import-csv-file"
+                   accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                   style="display:none;">
+            <button type="button" class="btn-secondary" id="btn-choose-file" style="margin-bottom:8px;">📁 Choose Excel or CSV File</button>
+            <div id="import-file-name" style="font-size:0.85rem; color:#193f34; font-weight:600; min-height:1.2em;">No file selected</div>
+            <div style="font-size:0.75rem; color:#8b9791; margin-top:4px;">Supported columns: Name, Phone/Mobile, Company, City, State, Email, Notes</div>
+          </div>
+
+          <!-- Only appears when an Excel file has more than one sheet/tab. -->
+          <div id="import-sheet-wrap" style="display:none; margin-bottom:14px;">
+            <label>Which sheet holds your leads?
+              <select id="import-sheet-select"></select>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <label>Lead Source
+              <select id="import-default-source">
+                <option value="Facebook Ads">Facebook Ads</option>
+                <option value="IndiaMART">IndiaMART</option>
+                <option value="Website Inquiry">Website Inquiry</option>
+                <option value="Google Ads">Google Ads</option>
+                <option value="Justdial">Justdial</option>
+                <option value="Trade Show">Trade Show</option>
+                <option value="Cold Calling">Cold Calling</option>
+                <option value="Referral">Referral</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+            <label>Initial Status
+              <select id="import-default-status">
+                <option value="New" selected>New</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Active">Active</option>
+              </select>
+            </label>
+          </div>
+
+          <label style="flex-direction:row; align-items:center; gap:8px; margin: 6px 0 10px; cursor:pointer; font-weight:normal; font-size:0.85rem; color:#1a2420;">
+            <input type="checkbox" id="import-skip-duplicates" checked style="width:auto; margin:0;">
+            <span>Skip duplicates if phone number already exists in CRM</span>
+          </label>
+
+          <!-- Column Mapping (Auto-detected with manual override) -->
+          <div id="import-mapping-wrap" style="display:none; margin: 10px 0; padding: 12px; background: #f6f8f6; border: 1px solid #dde3de; border-radius: 8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-size:0.8rem; font-weight:600; color:#193f34;">🎯 Matched Columns:</span>
+              <span style="font-size:0.72rem; color:#51605a;">(Auto-matched for Facebook, IndiaMART, Justdial, etc.)</span>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size:0.75rem;">
+              <label style="font-size:0.75rem; margin:0;">Name Column
+                <select id="map-col-name" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">Phone Column *
+                <select id="map-col-phone" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">Company Column
+                <select id="map-col-company" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">City Column
+                <select id="map-col-city" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">Email Column
+                <select id="map-col-email" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">Notes / Inquiry Column
+                <select id="map-col-notes" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+              <label style="font-size:0.75rem; margin:0;">Date Column
+                <select id="map-col-date" style="padding:4px 6px; font-size:0.75rem;"></select>
+              </label>
+            </div>
+            <p style="font-size:0.72rem; color:#8b9791; margin:8px 0 0;">
+              Map the Date column and every lead keeps the date it actually came in
+              (Meta calls this <em>created_time</em>). Leave it on None and today's date is used.
+            </p>
+          </div>
+
+          <!-- Preview Section -->
+          <div id="import-preview-wrap" style="display:none; margin-top:6px; border-top:1px solid #dde3de; padding-top:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span id="import-lead-count" style="font-size:0.85rem; font-weight:600; color:#193f34;"></span>
+              <span style="font-size:0.75rem; color:#8b9791;">First 5 rows preview:</span>
+            </div>
+            <div style="max-height:130px; overflow-y:auto; border:1px solid #dde3de; border-radius:6px;">
+              <table id="import-preview-table" style="min-width:100%; font-size:0.75rem;">
+                <thead>
+                  <tr style="background:#e3efe9;">
+                    <th style="padding:5px 8px;">Name</th>
+                    <th style="padding:5px 8px;">Phone</th>
+                    <th style="padding:5px 8px;">Company</th>
+                    <th style="padding:5px 8px;">City</th>
+                  </tr>
+                </thead>
+                <tbody id="import-preview-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="modal-actions" style="margin-top:16px;">
+            <button type="button" class="btn-secondary" id="btn-cancel-import">Cancel</button>
+            <button type="submit" class="btn-primary" id="btn-submit-import" disabled>Import Leads</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Who's using the app -->
+    <div class="login-overlay" id="login-overlay">
+      <div class="login-card">
+        <h1>Alpino CRM</h1>
+        <p>Pick your name to continue.</p>
+        <form id="login-form" autocomplete="on">
+          <select id="login-select" required>
+            <option value="">Loading users...</option>
+          </select>
+          <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+          <button id="login-btn" type="submit" class="btn-primary">Continue</button>
+          <p class="login-error" id="login-error"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- Which rows didn't make it in, and why -->
+    <div class="modal-overlay" id="import-details-overlay">
+      <div class="modal" style="max-width: 640px;">
+        <h3 id="import-details-title">Import Details</h3>
+        <div id="import-details-summary" style="font-size:0.88rem; color:#51605a; margin-bottom:14px;"></div>
+        <div class="table-wrap" style="max-height:340px; overflow-y:auto;">
+          <table>
+            <thead>
+              <tr><th>File Row</th><th>Name</th><th>Phone</th><th>Why it was skipped</th></tr>
+            </thead>
+            <tbody id="import-details-tbody"></tbody>
+          </table>
+          <p class="empty-state" id="import-details-empty" style="display:none;">Nothing was skipped — every row in this file was imported.</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="btn-close-import-details">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Client Detail Card
+         Opens when you click a client's name in the Clients table. Read-only:
+         it is the one place that shows a client's full Notes and the complete
+         history of every call made to them, with the outcome note from each. -->
+    <div class="modal-overlay" id="client-detail-overlay">
+      <div class="modal" style="max-width: 720px;">
+        <div class="detail-head">
+          <div>
+            <h3 id="detail-name" style="margin:0;">Client</h3>
+            <div id="detail-subline" class="detail-subline"></div>
+          </div>
+          <div id="detail-badges" class="detail-badges"></div>
+        </div>
+
+        <div id="detail-fields" class="detail-grid"></div>
+
+        <div class="detail-section">
+          <div class="detail-section-title">Client Note</div>
+          <div id="detail-notes" class="detail-note-box"></div>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-section-title">
+            Call &amp; Follow-up History <span id="detail-history-count" class="detail-count"></span>
+          </div>
+          <div id="detail-history" class="detail-history"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="btn-detail-followup">+ Schedule Follow-up</button>
+          <button type="button" class="btn-secondary" id="btn-detail-edit">Edit Client</button>
+          <button type="button" class="btn-primary" id="btn-close-client-detail">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- City suggestions. Filled in by JavaScript.html from a starter list of
+         Indian cities plus every city already used by an existing client, so
+         the list grows on its own as you add clients. Typing anything else is
+         still allowed — these are suggestions, not restrictions. -->
+    <datalist id="city-suggestions"></datalist>
+
+    <div id="toast" class="toast"></div>
+
+    <?!= include('JavaScript'); ?>
+  </body>
+</html>
